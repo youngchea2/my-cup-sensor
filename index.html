@@ -6,58 +6,71 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { text-align: center; font-family: sans-serif; padding: 20px; }
-        #camera-container { width: 100%; max-width: 400px; margin: 0 auto; background: #eee; min-height: 250px; border: 2px dashed #ccc; }
-        button { padding: 20px; font-size: 18px; background: #007bff; color: white; border: none; border-radius: 10px; margin: 10px; }
+        video { width: 100%; max-width: 400px; background: #000; border-radius: 10px; }
+        button { padding: 15px 30px; font-size: 18px; background: #007bff; color: white; border: none; border-radius: 8px; margin: 10px; }
     </style>
 </head>
 <body>
-    <h1>컵 감지 센서</h1>
-    <div id="status">상태: 라이브러리 로딩 확인 중...</div>
-    <button id="start-btn">카메라 권한 허용 및 시작</button>
-    <div id="camera-container"></div>
-    <div id="results" style="font-size: 20px; font-weight: bold; margin-top: 10px;"></div>
+    <h1>AI 컵 센서</h1>
+    <div id="status">준비 완료</div>
+    <button id="start-btn">카메라 및 센서 시작</button>
+    <br>
+    <video id="video" autoplay playsinline></video>
+    <div id="results" style="font-size: 24px; margin-top: 15px; font-weight: bold;"></div>
+
+    <script src="edge-impulse-standalone.js"></script>
 
     <script>
-        // 파일 로딩 확인용
-        function checkFile(name) {
-            console.log(name + " 로드 시도...");
-        }
-    </script>
-    <script src="edge-impulse-standalone.js" onload="checkFile('JS 엔진')"></script>
-    <script src="run-impulse.js" onload="checkFile('런타임')"></script>
-
-    <script>
+        const video = document.getElementById('video');
         const status = document.getElementById('status');
-        const startBtn = document.getElementById('start-btn');
+        const results = document.getElementById('results');
+        let classifier;
 
-        // 파일이 정상적으로 로드되었는지 3초 후 점검
-        setTimeout(() => {
-            if (typeof EdgeImpulseClassifier === 'undefined') {
-                status.innerText = "상태: 에러 - 라이브러리 파일을 찾을 수 없음";
-                status.style.color = "red";
-            } else {
-                status.innerText = "상태: 준비 완료! 버튼을 누르세요.";
-                status.style.color = "green";
+        document.getElementById('start-btn').onclick = async () => {
+            try {
+                status.innerText = "초기화 중...";
+                
+                // 1. 카메라 켜기 (사용자 인터랙션 이후 실행)
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } // 후면 카메라 우선
+                });
+                video.srcObject = stream;
+                status.innerText = "카메라 연결됨. 모델 로딩 중...";
+
+                // 2. 모델 초기화
+                classifier = new EdgeImpulseClassifier();
+                await classifier.init();
+                status.innerText = "작동 중!";
+                
+                // 3. 반복 분석 시작
+                setInterval(classify, 500); // 0.5초마다 판독
+
+            } catch (err) {
+                status.innerText = "에러: " + err.message;
+                console.error(err);
             }
-        }, 3000);
-
-        startBtn.onclick = function() {
-            status.innerText = "상태: 카메라 구동 시도 중...";
-            // 진동 테스트 (버튼 누를 때 바로 울리는지 확인)
-            if (navigator.vibrate) navigator.vibrate(100);
         };
 
-        // 결과 가로채기
-        const vLog = console.log;
-        console.log = function (msg) {
-            vLog.apply(console, arguments);
-            if (typeof msg === 'string' && msg.includes('CUP')) {
-                document.getElementById('results').innerText = msg;
-                if (msg.includes('0.8') || msg.includes('0.9')) {
+        async function classify() {
+            if (!classifier) return;
+            
+            // 실시간 분석 결과 가져오기
+            // (참고: 이 함수는 모델에 따라 getFeaturesFromVideo 등 별도 변환이 필요할 수 있습니다.)
+            const res = await classifier.classify(); 
+            
+            if (res.classification) {
+                const cup = res.classification.find(i => i.label === 'CUP');
+                const score = cup ? cup.value : 0;
+                results.innerText = "CUP: " + (score * 100).toFixed(1) + "%";
+
+                if (score > 0.8) {
+                    results.style.color = "red";
                     if (navigator.vibrate) navigator.vibrate(500);
+                } else {
+                    results.style.color = "black";
                 }
             }
-        };
+        }
     </script>
 </body>
 </html>
