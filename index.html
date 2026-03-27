@@ -1,3 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>컵 감지기</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; background: #1a1a2e; color: white; padding: 16px; }
+    video { width: 100%; max-width: 480px; border-radius: 12px; }
+    canvas { display: none; }
+    #status { font-size: 1.8rem; margin: 16px 0; }
+    #log { font-size: 0.8rem; color: #888; text-align: left;
+           background: #111; padding: 8px; border-radius: 8px;
+           max-height: 120px; overflow-y: auto; margin-top: 12px; }
+    button { padding: 12px 28px; font-size: 1rem; border-radius: 8px;
+             background: #6c63ff; color: white; border: none; cursor: pointer; margin: 6px; }
+  </style>
+</head>
+<body>
+  <h2>🔍 컵 감지기</h2>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div id="status">모델 로딩 중...</div>
+  <div id="scores"></div>
+  <br>
+  <button id="startBtn" onclick="startDetection()" disabled>감지 시작</button>
+  <button onclick="stopDetection()">중지</button>
+  <div id="log"></div>
+
+  <!-- ★ 다운받은 파일명으로 변경하세요 ★ -->
+  <script src="edge-impulse-standalone.js"></script>
+
+  <script>
+    let running = false;
+    let audioCtx = null;
+    let classifier = null;
+
+    function log(msg) {
+      const el = document.getElementById('log');
+      el.innerHTML += `<div>${new Date().toLocaleTimeString()} ${msg}</div>`;
+      el.scrollTop = el.scrollHeight;
+      console.log(msg);
+    }
+
+    // ─── 모델 초기화 (다양한 API 이름 자동 탐지) ───
+    async function initModel() {
+      log('모델 초기화 시작...');
+
+      // Edge Impulse WASM이 노출하는 가능한 전역 객체명들
+      const candidates = [
+        'EdgeImpulseClassifier',
+        'Module',
+        'EdgeImpulse',
+        'ei',
+      ];
+
+      for (const name of candidates) {
+        if (window[name]) {
+          log(`전역 객체 발견: ${name}`);
+          classifier = window[name];
+          break;
+        }
+      }
+
+      if (!classifier) {
+        log('❌ 전역 객체를 못 찾음. 현재 window 키:');
+        // 알려진 EI 관련 키만 출력
+        Object.keys(window)
+          .filter(k => k.toLowerCase().includes('edge') || k.toLowerCase().includes('impulse') || k === 'Module')
+          .forEach(k => log('  → ' + k));
+        document.getElementById('status').textContent = '❌ 모델 로드 실패 — 콘솔 확인';
+        return;
+      }
+
+      // init() 또는 run()이 있으면 호출
+      try {
+        if (typeof classifier.init === 'function') {
+          await classifier.init();
+          log('classifier.init() 완료');
+        } else if (typeof classifier.run_classifier_init === 'function') {
+          await classifier.run_classifier_init();
+          log('run_classifier_init() 완료');
+        } else {
+          log('init 함수 없음 — 바로 사용 시도');
+        }
+      } catch(e) {
+        log('init 오류 (무시): ' + e.message);
+      }
+
+      log('✅ 모델 준비 완료');
+      document.getElementById('status').textContent = '준비 완료 — 감지 시작을 누르세요';
+      document.getElementById('startBtn').disabled = false;
+    }
+
+    // ─── 카메라 시작 ───
+    async function startDetection() {
+      const video = document.getElementById('video');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: 640, height: 480 }
+        });
+        video.srcObject = stream;
+        await video.play();
+        log('카메라 시작');
+        running = true;
+        runLoop();
+      } catch(e) {
+        log('카메라 오류: ' + e.message);
+      }
+    }
+
+    function stopDetection() {
+      running = false;
+      document.getElementById('status').textContent = '중지됨';
+    }
+
 async function runLoop() {
   if (!running) return;
 
@@ -51,3 +167,26 @@ async function runLoop() {
 
   setTimeout(runLoop, 600);
 }
+
+    // ─── 알람 ───
+    function playAlarm() {
+      audioCtx = audioCtx || new AudioContext();
+      [880, 660, 880].forEach((freq, i) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        const t = audioCtx.currentTime + i * 0.2;
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(0.3, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.18);
+        osc.start(t);
+        osc.stop(t + 0.18);
+      });
+    }
+
+    // 페이지 로드 시 바로 모델 초기화
+    window.addEventListener('load', initModel);
+  </script>
+</body>
+</html>
