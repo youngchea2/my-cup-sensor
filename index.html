@@ -2,41 +2,51 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>AI Sensor</title>
+    <title>AI 컵 센서</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        button { padding: 20px; font-size: 20px; background: #007bff; color: white; border: none; border-radius: 10px; cursor: pointer; }
+        body { text-align: center; padding: 20px; font-family: sans-serif; }
+        #camera-container { width: 100%; max-width: 400px; margin: 0 auto; border: 2px solid #ccc; min-height: 200px; }
+        button { padding: 15px 30px; font-size: 18px; background: #28a745; color: white; border: none; border-radius: 5px; margin: 20px; cursor: pointer; }
     </style>
 </head>
 <body>
     <h1>AI 컵 센서 테스트</h1>
-    <div id="status">준비 완료. 아래 버튼을 눌러주세요.</div>
-    <br>
-    <button id="run-btn">카메라 및 진동 시작</button>
-    <div id="results" style="font-size: 24px; margin-top: 20px; font-weight: bold;"></div>
+    <div id="status">파일 로딩 완료. 버튼을 누르면 시작합니다.</div>
+    
+    <button id="start-btn">카메라 시작 및 진동 활성화</button>
+    
+    <div id="camera-container"></div>
+    <div id="results" style="font-size: 24px; margin-top: 20px; font-weight: bold; color: blue;"></div>
 
     <script src="edge-impulse-standalone.js"></script>
     <script src="run-impulse.js"></script>
 
     <script>
-        const btn = document.getElementById('run-btn');
-        btn.onclick = function() {
-            document.getElementById('status').innerText = '카메라 연결 시도 중...';
-            // run-impulse.js 내부의 초기화 함수를 호출하거나 
-            // 직접 카메라를 띄우는 로직이 작동하도록 유도합니다.
-            if(window.classifier) {
-                document.getElementById('status').innerText = '작동 중!';
-            }
+        const startBtn = document.getElementById('start-btn');
+        const resultsDiv = document.getElementById('results');
+
+        startBtn.onclick = function() {
+            document.getElementById('status').innerText = '카메라 연결 중... (팝업창에서 허용을 눌러주세요)';
+            
+            // run-impulse.js가 내부적으로 카메라를 실행하도록 트리거
+            // 보통 로딩 직후 자동으로 실행되지만, 버튼 클릭으로 권한을 획득하는 것이 중요합니다.
         };
 
+        // 결과 가로채기 (진동 포함)
         const originalLog = console.log;
         console.log = function (message) {
             originalLog.apply(console, arguments);
+            
             if (typeof message === 'string' && message.includes('CUP')) {
-                document.getElementById('results').innerText = message;
+                resultsDiv.innerText = message;
+                
+                // 확률 분석 (CUP(0.85) 형태의 문자열에서 숫자 추출)
                 const scoreMatch = message.match(/CUP\s*\(([0-9.]+)\)/);
                 if (scoreMatch && parseFloat(scoreMatch[1]) > 0.8) {
-                    if (navigator.vibrate) navigator.vibrate(300);
+                    if (navigator.vibrate) {
+                        navigator.vibrate(500); // 0.5초 진동
+                    }
                 }
             }
         };
