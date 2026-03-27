@@ -2,70 +2,72 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>AI Cup Sensor - Fix</title>
+    <title>AI Cup Sensor - Debug</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { text-align: center; font-family: sans-serif; padding: 20px; background: #f4f4f4; }
         #container { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: inline-block; width: 100%; max-width: 500px; }
         video { width: 100%; background: #000; border-radius: 10px; display: none; margin-top: 10px; }
         button { padding: 15px 30px; font-size: 18px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; display: none; width: 100%; }
-        #status { margin: 15px 0; font-weight: bold; }
-        #results { font-size: 24px; margin-top: 15px; font-weight: bold; color: #007bff; }
+        #status { margin: 15px 0; font-weight: bold; font-size: 14px; }
     </style>
 </head>
 <body>
     <div id="container">
         <h1>AI 컵 센서</h1>
-        <div id="status" style="color: blue;">1단계: 라이브러리 로딩 시도 중...</div>
-        <button id="start-btn">2단계: 카메라 및 센서 시작</button>
+        <div id="status" style="color: blue;">파일 분석 중...</div>
+        <button id="start-btn">센서 시작</button>
         <video id="video" autoplay playsinline></video>
-        <div id="results"></div>
+        <div id="results" style="font-size: 24px; margin-top: 15px; font-weight: bold; color: #007bff;"></div>
     </div>
 
     <script>
-        // 1. 변수와 함수를 먼저 정의합니다 (중요!)
         const status = document.getElementById('status');
         const startBtn = document.getElementById('start-btn');
         const video = document.getElementById('video');
         const results = document.getElementById('results');
         let classifier;
 
-        function onLibraryLoaded() {
-            status.innerText = "로딩 완료! 버튼을 누르세요.";
-            status.style.color = "green";
-            startBtn.style.display = "block";
+        // 라이브러리 안에서 진짜 클래스 이름을 찾는 탐정 함수
+        function findClassifier() {
+            const keys = Object.keys(window);
+            // EdgeImpulse, Classifier, 혹은 프로젝트명이 포함된 객체를 찾습니다.
+            return keys.find(k => 
+                (k.toLowerCase().includes('edge') || k.toLowerCase().includes('classifier')) 
+                && typeof window[k] === 'function'
+            );
         }
 
-        function onLibraryError() {
-            status.innerText = "에러: .js 파일을 찾을 수 없습니다. (파일명 확인 필요)";
-            status.style.color = "red";
+        function onLibraryLoaded() {
+            const foundName = findClassifier();
+            if (foundName) {
+                status.innerText = "찾았습니다! (" + foundName + ") 버튼을 누르세요.";
+                status.style.color = "green";
+                window.RealClassName = foundName; // 찾은 이름을 전역 변수에 저장
+                startBtn.style.display = "block";
+            } else {
+                status.innerText = "파일 안에서 AI 엔진을 찾지 못했습니다. (JS 파일 내용 확인 필요)";
+                status.style.color = "red";
+            }
         }
 
         startBtn.onclick = async () => {
             try {
                 startBtn.style.display = "none";
                 status.innerText = "카메라 및 AI 엔진 구동 중...";
-                status.style.color = "blue";
 
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment' } 
-                });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
                 video.srcObject = stream;
                 video.style.display = "block";
 
-                // 클래스 존재 여부 체크 (버전 차이 대응)
-                const ClassifierClass = window.EdgeImpulseClassifier || window.Classifier;
-                if (!ClassifierClass) {
-                    throw new Error("라이브러리 내부 클래스가 정의되지 않았습니다.");
-                }
-
-                classifier = new ClassifierClass();
+                // 찾은 이름으로 초기화
+                classifier = new window[window.RealClassName]();
                 await classifier.init();
                 
-                status.innerText = "감시 중... 컵을 비춰보세요!";
+                status.innerText = "분석 시작! 컵을 비춰보세요.";
                 setInterval(classify, 500);
             } catch (err) {
-                status.innerText = "초기화 실패: " + err.message;
+                status.innerText = "구동 실패: " + err.message;
                 status.style.color = "red";
             }
         };
@@ -75,25 +77,21 @@
             try {
                 const res = await classifier.classify(); 
                 if (res.classification) {
-                    const cup = res.classification.find(i => i.label.toUpperCase() === 'CUP');
+                    const cup = res.classification.find(i => i.label.toUpperCase().includes('CUP'));
                     const score = cup ? cup.value : 0;
-                    results.innerText = "CUP 감지: " + (score * 100).toFixed(1) + "%";
+                    results.innerText = "CUP 확률: " + (score * 100).toFixed(1) + "%";
 
                     if (score > 0.8) {
-                        results.style.color = "red";
                         if (navigator.vibrate) navigator.vibrate(500); 
-                    } else {
-                        results.style.color = "#007bff";
                     }
                 }
             } catch (e) { }
         }
 
-        // 2. 함수가 모두 정의된 후, 라이브러리를 동적으로 불러옵니다.
         const script = document.createElement('script');
-        script.src = "edge-impulse-standalone.js?v=" + Date.now(); // 캐시 방지용 랜덤값
+        script.src = "edge-impulse-standalone.js?v=" + Date.now();
         script.onload = onLibraryLoaded;
-        script.onerror = onLibraryError;
+        script.onerror = () => { status.innerText = "파일 로드 실패"; status.style.color = "red"; };
         document.body.appendChild(script);
     </script>
 </body>
