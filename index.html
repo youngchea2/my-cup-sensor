@@ -4,30 +4,36 @@
     <meta charset="utf-8">
     <title>AI Sensor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        button { padding: 20px; font-size: 20px; background: #007bff; color: white; border: none; border-radius: 10px; cursor: pointer; }
+    </style>
 </head>
 <body>
     <h1>AI 컵 센서 테스트</h1>
-    <div id="status" style="color: blue;">라이브러리 로딩 중...</div>
+    <div id="status">준비 완료. 아래 버튼을 눌러주세요.</div>
+    <br>
+    <button id="run-btn">카메라 및 진동 시작</button>
     <div id="results" style="font-size: 24px; margin-top: 20px; font-weight: bold;"></div>
 
-    <script src="edge-impulse-standalone.js" onerror="document.getElementById('status').innerText='에러: js파일을 찾지 못함'"></script>
+    <script src="edge-impulse-standalone.js"></script>
     <script src="run-impulse.js"></script>
 
     <script>
-        window.onload = function() {
-            document.getElementById('status').innerText = '카메라 권한을 허용하고 잠시 기다려주세요...';
+        const btn = document.getElementById('run-btn');
+        btn.onclick = function() {
+            document.getElementById('status').innerText = '카메라 연결 시도 중...';
+            // run-impulse.js 내부의 초기화 함수를 호출하거나 
+            // 직접 카메라를 띄우는 로직이 작동하도록 유도합니다.
+            if(window.classifier) {
+                document.getElementById('status').innerText = '작동 중!';
+            }
         };
 
-        // Edge Impulse의 결과를 가로채서 화면에 표시하고 진동 울리기
         const originalLog = console.log;
         console.log = function (message) {
             originalLog.apply(console, arguments);
-            
             if (typeof message === 'string' && message.includes('CUP')) {
-                document.getElementById('status').innerText = '작동 중!';
                 document.getElementById('results').innerText = message;
-                
-                // 확률 추출 및 진동 (80% 이상)
                 const scoreMatch = message.match(/CUP\s*\(([0-9.]+)\)/);
                 if (scoreMatch && parseFloat(scoreMatch[1]) > 0.8) {
                     if (navigator.vibrate) navigator.vibrate(300);
