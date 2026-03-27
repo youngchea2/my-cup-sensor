@@ -2,53 +2,65 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>AI 컵 센서</title>
+    <title>AI Cup Sensor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { text-align: center; padding: 20px; font-family: sans-serif; }
-        #camera-container { width: 100%; max-width: 400px; margin: 0 auto; border: 2px solid #ccc; min-height: 200px; }
-        button { padding: 15px 30px; font-size: 18px; background: #28a745; color: white; border: none; border-radius: 5px; margin: 20px; cursor: pointer; }
+        body { text-align: center; font-family: sans-serif; padding: 20px; background: #f4f4f4; }
+        #inner-container { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: inline-block; width: 100%; max-width: 500px; }
+        #camera-container { width: 100%; min-height: 300px; background: #000; margin: 10px 0; border-radius: 10px; overflow: hidden; }
+        button { padding: 15px 30px; font-size: 18px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        #results { font-size: 24px; color: #007bff; margin-top: 15px; min-height: 30px; }
+        #error-log { color: red; font-size: 14px; margin-top: 10px; text-align: left; }
     </style>
 </head>
 <body>
-    <h1>AI 컵 센서 테스트</h1>
-    <div id="status">파일 로딩 완료. 버튼을 누르면 시작합니다.</div>
-    
-    <button id="start-btn">카메라 시작 및 진동 활성화</button>
-    
-    <div id="camera-container"></div>
-    <div id="results" style="font-size: 24px; margin-top: 20px; font-weight: bold; color: blue;"></div>
+    <div id="inner-container">
+        <h1>컵 감지 센서</h1>
+        <button id="start-btn">센서 시작</button>
+        <div id="camera-container"></div>
+        <div id="results">준비 완료</div>
+        <div id="error-log"></div>
+    </div>
 
     <script src="edge-impulse-standalone.js"></script>
     <script src="run-impulse.js"></script>
 
     <script>
-        const startBtn = document.getElementById('start-btn');
         const resultsDiv = document.getElementById('results');
+        const errorLog = document.getElementById('error-log');
 
-        startBtn.onclick = function() {
-            document.getElementById('status').innerText = '카메라 연결 중... (팝업창에서 허용을 눌러주세요)';
+        // 시스템 로그 가로채기 (결과 감시)
+        const vOriginalLog = console.log;
+        console.log = function (msg) {
+            vOriginalLog.apply(console, arguments);
             
-            // run-impulse.js가 내부적으로 카메라를 실행하도록 트리거
-            // 보통 로딩 직후 자동으로 실행되지만, 버튼 클릭으로 권한을 획득하는 것이 중요합니다.
-        };
-
-        // 결과 가로채기 (진동 포함)
-        const originalLog = console.log;
-        console.log = function (message) {
-            originalLog.apply(console, arguments);
-            
-            if (typeof message === 'string' && message.includes('CUP')) {
-                resultsDiv.innerText = message;
+            // AI 판독 결과에 'CUP'이 포함된 경우
+            if (typeof msg === 'string' && msg.includes('CUP')) {
+                resultsDiv.innerText = msg;
                 
-                // 확률 분석 (CUP(0.85) 형태의 문자열에서 숫자 추출)
-                const scoreMatch = message.match(/CUP\s*\(([0-9.]+)\)/);
-                if (scoreMatch && parseFloat(scoreMatch[1]) > 0.8) {
+                // 정규식으로 숫자만 추출: CUP (0.85) -> 0.85
+                const match = msg.match(/CUP\s*\(([0-9.]+)\)/);
+                if (match && parseFloat(match[1]) > 0.8) {
+                    resultsDiv.style.color = 'red';
                     if (navigator.vibrate) {
                         navigator.vibrate(500); // 0.5초 진동
                     }
+                } else {
+                    resultsDiv.style.color = '#007bff';
                 }
             }
+        };
+
+        // 에러 가로채기
+        window.onerror = function(msg) {
+            errorLog.innerHTML += msg + "<br>";
+        };
+
+        document.getElementById('start-btn').onclick = function() {
+            this.style.display = 'none';
+            resultsDiv.innerText = "카메라 초기화 중...";
+            // run-impulse.js가 로딩되면 자동으로 실행되지만, 
+            // 버튼 클릭 인터랙션이 있어야 진동/소리 권한이 완벽히 풀립니다.
         };
     </script>
 </body>
