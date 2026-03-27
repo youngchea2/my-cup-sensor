@@ -5,18 +5,18 @@
     <title>AI Cup Sensor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { text-align: center; font-family: sans-serif; padding: 20px; background: #f9f9f9; }
-        #container { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: inline-block; width: 100%; max-width: 450px; }
+        body { text-align: center; font-family: sans-serif; padding: 20px; background: #f4f4f4; }
+        #container { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: inline-block; width: 100%; max-width: 500px; }
         video { width: 100%; background: #000; border-radius: 10px; display: none; margin-top: 10px; }
-        button { padding: 15px 30px; font-size: 18px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; display: none; width: 100%; }
+        button { padding: 15px 30px; font-size: 18px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; display: none; width: 100%; }
         #status { margin: 15px 0; font-weight: bold; color: #555; }
-        #results { font-size: 24px; margin-top: 15px; font-weight: bold; color: #007bff; }
+        #results { font-size: 24px; margin-top: 15px; font-weight: bold; color: #d9534f; }
     </style>
 </head>
 <body>
     <div id="container">
         <h1>AI 컵 센서</h1>
-        <div id="status">시스템 초기화 중...</div>
+        <div id="status">시스템 체크 중...</div>
         <button id="start-btn">카메라 및 센서 시작</button>
         <video id="video" autoplay playsinline></video>
         <div id="results"></div>
@@ -29,57 +29,52 @@
         const results = document.getElementById('results');
         let classifier;
 
-        // 1. 라이브러리 강제 로드 함수
-        function loadScript(url) {
+        // [핵심] 라이브러리를 동적으로 로드하고 완료될 때까지 기다립니다.
+        function loadEdgeImpulse() {
             return new Promise((resolve, reject) => {
                 const script = document.createElement('script');
-                // 캐시 방지를 위해 랜덤 번호를 붙여서 불러옵니다
-                script.src = url + "?v=" + Math.random();
+                // 캐시 방지를 위해 랜덤 쿼리 추가
+                script.src = "edge-impulse-standalone.js?v=" + Date.now();
                 script.onload = resolve;
-                script.onerror = reject;
+                script.onerror = () => reject(new Error("JS 파일을 찾을 수 없습니다."));
                 document.head.appendChild(script);
             });
         }
 
-        // 2. 실행 순서 제어
-        async function initSystem() {
+        async function startSystem() {
             try {
                 status.innerText = "라이브러리 로딩 중...";
-                // 깃허브에 있는 파일명을 순서대로 불러옵니다
-                await loadScript('edge-impulse-standalone.js');
+                await loadEdgeImpulse();
                 
-                status.innerText = "준비 완료! 버튼을 누르세요.";
+                status.innerText = "로딩 완료! 버튼을 눌러주세요.";
                 status.style.color = "green";
-                startBtn.style.display = "block";
-            } catch (e) {
-                status.innerText = "에러: 파일을 찾을 수 없습니다. (파일명/대소문자 확인)";
+                startBtn.style.display = "block"; // 로딩이 끝나야 버튼이 나타남
+            } catch (err) {
+                status.innerText = "오류: " + err.message;
                 status.style.color = "red";
             }
         }
 
-        // 3. 버튼 클릭 시 동작
         startBtn.onclick = async () => {
             try {
                 startBtn.style.display = "none";
-                status.innerText = "카메라 권한 요청 중...";
+                status.innerText = "카메라 및 AI 초기화 중...";
 
-                // 카메라 시작
+                // 1. 카메라 기동
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: 'environment' } 
                 });
                 video.srcObject = stream;
                 video.style.display = "block";
 
-                // 모델 초기화
-                status.innerText = "AI 모델 데이터 로딩 중...";
+                // 2. 모델 초기화 (이제 무조건 로드된 상태임)
                 classifier = new EdgeImpulseClassifier();
                 await classifier.init();
                 
-                status.innerText = "인식 중... 컵을 비춰보세요!";
+                status.innerText = "감시 중...";
                 setInterval(classify, 500);
             } catch (err) {
-                status.innerText = "오류: " + err.message;
-                status.style.color = "red";
+                status.innerText = "초기화 실패: " + err.message;
             }
         };
 
@@ -90,20 +85,17 @@
                 if (res.classification) {
                     const cup = res.classification.find(i => i.label === 'CUP');
                     const score = cup ? cup.value : 0;
-                    results.innerText = "CUP 감지: " + (score * 100).toFixed(1) + "%";
+                    results.innerText = "CUP: " + (score * 100).toFixed(1) + "%";
 
                     if (score > 0.8) {
-                        results.style.color = "red";
                         if (navigator.vibrate) navigator.vibrate(500); 
-                    } else {
-                        results.style.color = "#007bff";
                     }
                 }
             } catch (e) { }
         }
 
-        // 초기화 실행
-        initSystem();
+        // 시스템 시작
+        startSystem();
     </script>
 </body>
 </html>
