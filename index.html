@@ -6,81 +6,87 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { text-align: center; font-family: sans-serif; padding: 20px; }
-        video { width: 100%; max-width: 400px; background: #000; border-radius: 10px; }
-        button { padding: 15px 30px; font-size: 18px; background: #007bff; color: white; border: none; border-radius: 8px; margin: 10px; }
+        video { width: 100%; max-width: 400px; background: #000; border-radius: 10px; display: none; }
+        button { padding: 15px 30px; font-size: 18px; background: #28a745; color: white; border: none; border-radius: 8px; margin: 10px; cursor: pointer; }
+        #results { font-size: 24px; margin-top: 15px; font-weight: bold; }
     </style>
 </head>
 <body>
     <h1>AI 컵 센서</h1>
-    <div id="status">준비 완료</div>
-    <button id="start-btn">카메라 및 센서 시작</button>
+    <div id="status" style="color: blue;">시스템 준비 중...</div>
+    <button id="start-btn" style="display: none;">카메라 및 센서 시작</button>
     <br>
     <video id="video" autoplay playsinline></video>
-    <div id="results" style="font-size: 24px; margin-top: 15px; font-weight: bold;"></div>
-
-    <script src="https://youngchea2.github.io/my-cup-sensor/edge-impulse-standalone.js" onerror="document.getElementById('status').innerText='에러: 주소로도 로드 실패'"></script>
+    <div id="results"></div>
 
     <script>
-        const video = document.getElementById('video');
         const status = document.getElementById('status');
+        const startBtn = document.getElementById('start-btn');
+        const video = document.getElementById('video');
         const results = document.getElementById('results');
         let classifier;
 
-        document.getElementById('start-btn').onclick = async () => {
+        // 1. 스크립트를 수동으로 로드하여 로딩 완료를 감지합니다.
+        const script = document.createElement('script');
+        script.src = "edge-impulse-standalone.js?v=" + Date.now(); // 캐시 방지를 위해 시간값 추가
+        script.onload = () => {
+            status.innerText = "라이브러리 로드 완료! 버튼을 누르세요.";
+            status.style.color = "green";
+            startBtn.style.display = "inline-block";
+        };
+        script.onerror = () => {
+            status.innerText = "에러: 라이브러리 파일을 읽을 수 없습니다.";
+            status.style.color = "red";
+        };
+        document.head.appendChild(script);
+
+        // 2. 버튼 클릭 시 카메라 및 AI 구동
+        startBtn.onclick = async () => {
             try {
-                status.innerText = "초기화 중...";
-                
-                // 1. 카메라 켜기
+                startBtn.style.display = "none";
+                status.innerText = "카메라 및 모델 초기화 중...";
+
+                // 카메라 켜기
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: 'environment' } 
                 });
                 video.srcObject = stream;
+                video.style.display = "block";
 
-                // 2. 모델 라이브러리 존재 확인
-                if (typeof EdgeImpulseClassifier === 'undefined') {
-                    throw new Error("라이브러리가 로드되지 않았습니다. 파일명을 확인하세요.");
-                }
-
-                // 3. 모델 초기화
+                // 모델 초기화
                 classifier = new EdgeImpulseClassifier();
                 await classifier.init();
-                status.innerText = "작동 중!";
                 
-                // 4. 분석 루프 시작
+                status.innerText = "인식 중...";
                 setInterval(classify, 500);
 
             } catch (err) {
-                status.innerText = "에러: " + err.message;
+                status.innerText = "오류 발생: " + err.message;
                 status.style.color = "red";
             }
         };
 
         async function classify() {
             if (!classifier) return;
-            
-            // 이미지 분석 시도 (Edge Impulse 표준 함수 사용)
             try {
-                const res = await classifier.classify(getFeaturesFromVideo(video));
-                
+                // 분석 시도
+                const res = await classifier.classify(); 
                 if (res.classification) {
                     const cup = res.classification.find(i => i.label === 'CUP');
                     const score = cup ? cup.value : 0;
-                    results.innerText = "CUP: " + (score * 100).toFixed(1) + "%";
+                    results.innerText = "CUP 감지: " + (score * 100).toFixed(1) + "%";
 
                     if (score > 0.8) {
                         results.style.color = "red";
-                        if (navigator.vibrate) navigator.vibrate(500);
+                        if (navigator.vibrate) navigator.vibrate(500); 
                     } else {
                         results.style.color = "black";
                     }
                 }
             } catch (e) {
-                console.log("분석 중...");
+                // 추론 대기 중
             }
         }
-
-        // 특징 추출 도우미 함수
-        function getFeaturesFromVideo(v) { return []; }
     </script>
 </body>
 </html>
