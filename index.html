@@ -1,277 +1,112 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>컵 감지기</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: sans-serif;
-      text-align: center;
-      background: #1a1a2e;
-      color: white;
-      padding: 16px;
-      min-height: 100vh;
-    }
-    h2 { font-size: 1.4rem; margin: 12px 0; }
-    video {
-      width: 100%;
-      max-width: 480px;
-      border-radius: 12px;
-      background: #000;
-      display: block;
-      margin: 0 auto;
-    }
-    canvas { display: none; }
-    #status {
-      font-size: 1.6rem;
-      margin: 14px 0 6px;
-      min-height: 2rem;
-      transition: color 0.3s;
-    }
-    #scores {
-      font-size: 0.85rem;
-      color: #aaa;
-      min-height: 1.2rem;
-      margin-bottom: 10px;
-    }
-    .btns { display: flex; gap: 10px; justify-content: center; margin: 10px 0; }
-    button {
-      padding: 12px 28px;
-      font-size: 1rem;
-      border-radius: 8px;
-      background: #6c63ff;
-      color: white;
-      border: none;
-      cursor: pointer;
-    }
-    button:disabled { background: #444; cursor: not-allowed; }
-    #log {
-      font-size: 0.75rem;
-      color: #888;
-      text-align: left;
-      background: #111;
-      padding: 8px 10px;
-      border-radius: 8px;
-      max-height: 130px;
-      overflow-y: auto;
-      margin-top: 12px;
-      line-height: 1.6;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cup Detector - Final Fix</title>
+    <style>
+        body { text-align: center; font-family: sans-serif; background: #1a1a2e; color: white; padding: 20px; }
+        video { width: 100%; max-width: 400px; border-radius: 12px; background: #000; }
+        #status { font-size: 1.5rem; margin: 20px 0; font-weight: bold; }
+        #scores { font-size: 1rem; color: #00ff00; margin-bottom: 15px; }
+        .btns button { padding: 15px 30px; font-size: 18px; border-radius: 8px; border: none; cursor: pointer; background: #6c63ff; color: white; }
+        #log { font-size: 0.7rem; color: #888; text-align: left; background: #000; padding: 10px; height: 100px; overflow-y: auto; margin-top: 20px; }
+    </style>
 </head>
 <body>
-  <h2>🔍 컵 감지기</h2>
-  <video id="video" autoplay playsinline muted></video>
-  <canvas id="canvas"></canvas>
-  <div id="status">모델 로딩 중...</div>
-  <div id="scores"></div>
-  <div class="btns">
-    <button id="startBtn" onclick="startDetection()" disabled>감지 시작</button>
-    <button onclick="stopDetection()">중지</button>
-  </div>
-  <div id="log"></div>
+    <h2>🔍 컵 감지 시스템</h2>
+    <video id="video" autoplay playsinline muted></video>
+    <div id="status">엔진 로드 중...</div>
+    <div id="scores">--- %</div>
+    <div class="btns">
+        <button id="startBtn" onclick="startCamera()" disabled>감지 시작</button>
+    </div>
+    <div id="log"></div>
 
-  <!-- ★ 반드시 같은 폴더에 있어야 합니다 ★ -->
-  <script src="edge-impulse-standalone.js"></script>
+    <script src="edge-impulse-standalone.js"></script>
 
-  <script>
-    let running = false;
-    let audioCtx = null;
-    let classifier = null;
-    let inputWidth = 96;
-    let inputHeight = 96;
-
-    /* ── 로그 출력 ── */
-    function log(msg) {
-      const el = document.getElementById('log');
-      const d = document.createElement('div');
-      d.textContent = new Date().toLocaleTimeString() + ' ' + msg;
-      el.appendChild(d);
-      el.scrollTop = el.scrollHeight;
-      console.log(msg);
-    }
-
-    /* ── 알람 (Web Audio) ── */
-    function playAlarm() {
-      try {
-        audioCtx = audioCtx || new AudioContext();
-        [880, 660, 880].forEach((freq, i) => {
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-          osc.connect(gain);
-          gain.connect(audioCtx.destination);
-          const t = audioCtx.currentTime + i * 0.22;
-          osc.frequency.setValueAtTime(freq, t);
-          gain.gain.setValueAtTime(0.35, t);
-          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-          osc.start(t);
-          osc.stop(t + 0.22);
-        });
-      } catch(e) { log('알람 오류: ' + e.message); }
-    }
-
-    /* ── 모델 초기화 ── */
-    async function initModel() {
-      log('모델 초기화 시작...');
-
-      // 전역 객체 탐색
-      const names = ['EdgeImpulseClassifier', 'Module', 'EdgeImpulse', 'ei'];
-      for (const n of names) {
-        if (window[n]) { classifier = window[n]; log('전역 객체: ' + n); break; }
-      }
-
-      if (!classifier) {
-        log('❌ 전역 객체 없음. window 키: ' +
-          Object.keys(window).filter(k => /edge|impulse|module/i.test(k)).join(', '));
-        document.getElementById('status').textContent = '❌ 모델 로드 실패';
-        return;
-      }
-
-      // init 함수 호출 시도
-      try {
-        if (typeof classifier.init === 'function') {
-          await classifier.init();
-          log('init() 완료');
-        } else {
-          log('init 없음 — 바로 사용');
-        }
-      } catch(e) { log('init 무시: ' + e.message); }
-
-      // 모델 입력 크기 읽기 (있으면)
-      try {
-        if (classifier.get_n_input_features) {
-          log('입력 피처 수: ' + classifier.get_n_input_features());
-        }
-      } catch(e) {}
-
-      log('✅ 준비 완료');
-      document.getElementById('status').textContent = '준비 완료 — 감지 시작을 누르세요';
-      document.getElementById('startBtn').disabled = false;
-    }
-
-    /* ── 카메라 시작 ── */
-    async function startDetection() {
-      const video = document.getElementById('video');
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: 640, height: 480 }
-        });
-        video.srcObject = stream;
-        await video.play();
-        log('카메라 시작');
-        running = true;
-        runLoop();
-      } catch(e) {
-        log('카메라 오류: ' + e.message);
-      }
-    }
-
-    function stopDetection() {
-      running = false;
-      document.getElementById('status').textContent = '중지됨';
-      document.getElementById('status').style.color = 'white';
-    }
-
-    /* ── 추론 루프 ── */
-    let firstRun = true;
-
-    async function runLoop() {
-      if (!running) return;
-
-      const video = document.getElementById('video');
-      const canvas = document.getElementById('canvas');
-      const ctx = canvas.getContext('2d');
-
-      const W = inputWidth, H = inputHeight;
-      canvas.width = W;
-      canvas.height = H;
-      ctx.drawImage(video, 0, 0, W, H);
-      const imageData = ctx.getImageData(0, 0, W, H);
-
-      try {
-        let result;
-
-        if (typeof classifier.classify === 'function') {
-          /* ── 방법 A: classify(Uint8Array) ── */
-          result = await classifier.classify(Array.from(imageData.data));
-
-        } else if (typeof classifier.run_classifier === 'function') {
-
-          /* ── 정수 배열(0~255) RGB 시도 ── */
-          const intArr = [];
-          for (let i = 0; i < imageData.data.length; i += 4) {
-            intArr.push(imageData.data[i]);     // R
-            intArr.push(imageData.data[i + 1]); // G
-            intArr.push(imageData.data[i + 2]); // B
-          }
-
-          try {
-            result = classifier.run_classifier(intArr, intArr.length, false);
-          } catch(e1) {
-            /* 실패 시 Float32(0~1) 시도 */
-            const floatArr = new Float32Array(W * H * 3);
-            for (let i = 0, j = 0; i < imageData.data.length; i += 4, j += 3) {
-              floatArr[j]     = imageData.data[i]     / 255;
-              floatArr[j + 1] = imageData.data[i + 1] / 255;
-              floatArr[j + 2] = imageData.data[i + 2] / 255;
-            }
-            try {
-              result = classifier.run_classifier(floatArr, floatArr.length, false);
-            } catch(e2) {
-              /* Float32 2인수 시도 */
-              result = classifier.run_classifier(floatArr, false);
-            }
-          }
-
-        } else {
-          log('❌ classify/run_classifier 없음. 메서드: ' +
-            Object.keys(classifier).filter(k => typeof classifier[k] === 'function').join(', '));
-          stopDetection();
-          return;
-        }
-
-        /* ── 첫 결과 구조 출력 (디버그용) ── */
-        if (firstRun) {
-          log('결과 구조: ' + JSON.stringify(result).slice(0, 200));
-          firstRun = false;
-        }
-
-        /* ── 결과 파싱 (다양한 구조 대응) ── */
-        const labels =
-          result?.result?.classification ??
-          result?.results ??
-          result?.classification ??
-          [];
-
-        if (labels.length === 0) {
-          log('라벨 파싱 실패. 구조: ' + JSON.stringify(result).slice(0, 150));
-        }
-
-        document.getElementById('scores').textContent =
-          labels.map(r => `${r.label}: ${(r.value * 100).toFixed(1)}%`).join('  |  ');
-
-        const cupScore = labels.find(r => r.label === 'cup')?.value ?? 0;
-
+    <script>
+        const video = document.getElementById('video');
         const statusEl = document.getElementById('status');
-        if (cupScore > 0.75) {
-          statusEl.textContent = '🔔 컵 감지됨!';
-          statusEl.style.color = '#ff6b6b';
-          playAlarm();
-        } else {
-          statusEl.textContent = '🔍 스캔 중... (' + (cupScore * 100).toFixed(0) + '%)';
-          statusEl.style.color = 'white';
+        const scoresEl = document.getElementById('scores');
+        const logEl = document.getElementById('log');
+        let classifier;
+
+        function log(m) { logEl.innerHTML += `<div>${new Date().toLocaleTimeString()} ${m}</div>`; logEl.scrollTop = logEl.scrollHeight; }
+
+        // 1. 모델 초기화 및 라이브러리 방식 확인
+        window.onload = () => {
+            const check = setInterval(() => {
+                classifier = window.EdgeImpulseClassifier || window.Module;
+                if (classifier) {
+                    clearInterval(check);
+                    statusEl.innerText = "준비 완료! 버튼을 누르세요.";
+                    document.getElementById('startBtn').disabled = false;
+                    log("엔진 감지 성공");
+                }
+            }, 500);
+        };
+
+        // 2. 카메라 구동
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                video.srcObject = stream;
+                statusEl.innerText = "실시간 분석 중...";
+                setInterval(predict, 600);
+            } catch (e) { log("카메라 오류: " + e.message); }
         }
 
-      } catch(e) {
-        if (firstRun) { log('추론 오류: ' + e.message); }
-      }
+        // 3. 핵심: 인자 개수(3개) 오류 수정 및 추론 실행
+        async function predict() {
+            if (!classifier) return;
 
-      setTimeout(runLoop, 700);
-    }
+            try {
+                let result;
+                // 방식 A: 최신 SDK (classify 메서드 존재 시)
+                if (typeof classifier.classify === 'function') {
+                    result = await classifier.classify(video);
+                } 
+                // 방식 B: Wasm/Module SDK (run_classifier 메서드 존재 시)
+                else if (typeof classifier.run_classifier === 'function') {
+                    // 비디오 프레임을 픽셀 데이터로 변환 (96x96 권장)
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 96; canvas.height = 96;
+                    canvas.getContext('2d').drawImage(video, 0, 0, 96, 96);
+                    const imgData = canvas.getContext('2d').getImageData(0,0,96,96).data;
+                    
+                    const pixels = [];
+                    for(let i=0; i<imgData.length; i+=4) {
+                        pixels.push(imgData[i], imgData[i+1], imgData[i+2]);
+                    }
 
-    window.addEventListener('load', initModel);
-  </script>
+                    // ★ 중요: 에러 해결 포인트 - 인자 3개를 정확히 전달
+                    // 인수 1: 데이터 배열, 인수 2: 배열 길이, 인수 3: 디버그 여부(false)
+                    result = classifier.run_classifier(pixels, pixels.length, false);
+                }
+
+                // 결과 파싱 및 화면 표시
+                const labels = result.classification || result.results || (result.result && result.result.classification);
+                if (labels) {
+                    const cup = labels.find(l => l.label.toLowerCase().includes('cup'));
+                    const score = cup ? (cup.value * 100).toFixed(1) : 0;
+                    
+                    scoresEl.innerText = labels.map(l => `${l.label}: ${(l.value*100).toFixed(0)}%`).join(' | ');
+
+                    if (score > 70) {
+                        statusEl.innerText = "🔔 컵 감지됨!!";
+                        statusEl.style.color = "#ff4444";
+                        if (navigator.vibrate) navigator.vibrate(300);
+                    } else {
+                        statusEl.innerText = "🔍 스캔 중...";
+                        statusEl.style.color = "white";
+                    }
+                }
+            } catch (err) {
+                // 한 번만 로그에 에러 출력
+                if (!window.errorLogged) { log("추론 중단됨: " + err.message); window.errorLogged = true; }
+            }
+        }
+    </script>
 </body>
 </html>
