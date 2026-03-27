@@ -2,76 +2,36 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>AI 컵 감지 센서</title>
+    <title>AI Sensor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; }
-        #video { width: 100%; max-width: 400px; border-radius: 10px; }
-        .result-box { margin-top: 20px; font-size: 24px; font-weight: bold; }
-        #start-btn { padding: 15px 30px; font-size: 18px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
-    </style>
 </head>
 <body>
-    <h1>컵 감지 센서</h1>
-    <button id="start-btn">카메라 시작 (진동 활성화)</button>
-    <br><br>
-    <video id="video" autoplay playsinline></video>
-    <div id="results" class="result-box">결과 대기 중...</div>
+    <h1>AI 컵 센서 테스트</h1>
+    <div id="camera-container"></div>
+    <div id="results" style="font-size: 24px; margin-top: 20px;">결과 대기 중...</div>
 
     <script src="edge-impulse-standalone.js"></script>
+    <script src="run-impulse.js"></script>
 
     <script>
-        const video = document.getElementById('video');
-        const resultsDiv = document.getElementById('results');
-        const startBtn = document.getElementById('start-btn');
-
-        let classifier;
-
-        // 카메라 시작 및 AI 초기화
-        startBtn.onclick = async () => {
-            startBtn.style.display = 'none';
+        // AI 엔진이 결과를 내보낼 때마다 실행되는 함수를 가로챕니다.
+        const originalLog = console.log;
+        console.log = function (message) {
+            originalLog.apply(console, arguments);
             
-            // 1. 모델 로드
-            classifier = new EdgeImpulseClassifier();
-            await classifier.init();
-
-            // 2. 카메라 권한 요청
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-            video.srcObject = stream;
-
-            // 3. 실시간 분석 시작
-            setInterval(classifyFrame, 500); // 0.5초마다 분석
-        };
-
-        async function classifyFrame() {
-            if (!classifier) return;
-
-            // 현재 카메라 화면 분석 (실제 내부 로직은 모델 라이브러리에 따라 다를 수 있음)
-            // 예제 코드의 핵심 부분입니다.
-            const result = await classifier.classify(getFeaturesFromVideo(video));
-
-            const cup = result.classification.find(r => r.label === 'CUP');
-            const score = cup ? cup.value : 0;
-
-            resultsDiv.innerText = `CUP 확률: ${(score * 100).toFixed(1)}%`;
-
-            // 컵이 80% 이상 감지되면 진동!
-            if (score > 0.8) {
-                resultsDiv.style.color = 'red';
-                if (navigator.vibrate) {
-                    window.navigator.vibrate(500); 
+            // 결과값에 'CUP'이 포함되어 있는지 확인
+            if (typeof message === 'string' && message.includes('CUP')) {
+                document.getElementById('results').innerText = message;
+                
+                // 확률이 0.8 이상인지 체크 (문자열 분석)
+                const scoreMatch = message.match(/CUP\s*\(([0-9.]+)\)/);
+                if (scoreMatch && parseFloat(scoreMatch[1]) > 0.8) {
+                    if (navigator.vibrate) {
+                        navigator.vibrate(500); // 0.5초 진동
+                    }
                 }
-            } else {
-                resultsDiv.style.color = 'black';
             }
-        }
-
-        // 비디오에서 특징 추출 (Edge Impulse 라이브러리 함수 활용)
-        function getFeaturesFromVideo(videoElement) {
-            // 이 부분은 다운로드 받으신 예제 폴더 내 run-impulse.js의 로직을 따릅니다.
-            // 여기서는 개념적인 흐름만 보여드립니다.
-            return []; // 실제 라이브러리 연동 시 필요한 데이터 형식으로 변환 필요
-        }
+        };
     </script>
 </body>
 </html>
