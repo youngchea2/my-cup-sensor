@@ -3,90 +3,110 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Cup Sensor - Final</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <title>AI Cup Sensor (Offline)</title>
     <style>
         body { text-align: center; font-family: sans-serif; background: #1a1a2e; color: white; margin: 0; padding: 20px; }
-        #video { width: 100%; max-width: 400px; border-radius: 15px; background: #000; }
-        #status { font-size: 1.5rem; margin: 20px 0; font-weight: bold; color: #6c63ff; }
-        #result { font-size: 1.2rem; color: #00ff00; background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; }
-        button { padding: 15px 30px; font-size: 18px; border-radius: 50px; border: none; background: #28a745; color: white; cursor: pointer; }
+        #video { width: 100%; max-width: 400px; border-radius: 15px; background: #000; border: 2px solid #333; }
+        #status { font-size: 1.4rem; margin: 20px 0; font-weight: bold; color: #6c63ff; }
+        #result { font-size: 1.1rem; color: #00ff00; background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; min-height: 1.2em; }
+        .btn-group { margin-top: 20px; }
+        button { padding: 15px 30px; font-size: 18px; border-radius: 50px; border: none; background: #28a745; color: white; cursor: pointer; font-weight: bold; }
+        #offline-badge { font-size: 0.8rem; color: #888; margin-top: 10px; }
     </style>
 </head>
 <body>
-    <h2>🔍 실시간 컵 감지 시스템</h2>
+    <h2>🔍 무선 컵 감지 시스템</h2>
     <video id="video" autoplay playsinline muted></video>
-    <div id="status">시스템 준비 중...</div>
-    <div id="result">기다려 주세요...</div>
-    <br>
-    <button id="startBtn" onclick="initCamera()">카메라 시작</button>
+    <div id="status">엔진 로딩 중...</div>
+    <div id="result">-- %</div>
+    
+    <div class="btn-group">
+        <button id="startBtn" onclick="initCamera()" disabled>센서 시작</button>
+    </div>
+    <div id="offline-badge">오프라인 모드 지원됨</div>
 
     <script src="edge-impulse-standalone.js"></script>
     <script src="run-impulse.js"></script>
 
     <script>
+        // 1. 오프라인 사용을 위한 서비스 워커 등록 (인라인 방식)
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                const swCode = `
+                    const CACHE_NAME = 'cup-v1';
+                    const ASSETS = ['./', './index.html', './edge-impulse-standalone.js', './edge-impulse-standalone.wasm', './run-impulse.js'];
+                    self.addEventListener('install', e => e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS))));
+                    self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));
+                `;
+                const blob = new Blob([swCode], { type: 'application/javascript' });
+                navigator.serviceWorker.register(URL.createObjectURL(blob));
+            });
+        }
+
         let classifier;
         const video = document.getElementById('video');
         const statusEl = document.getElementById('status');
         const resultEl = document.getElementById('result');
+        const startBtn = document.getElementById('startBtn');
 
-        // 1. 모델 초기화 대기
-        window.onload = async () => {
-            const check = setInterval(() => {
+        // 2. 모델 엔진 초기화
+        window.onload = () => {
+            const checkEngine = setInterval(() => {
                 if (typeof EdgeImpulseClassifier !== 'undefined') {
                     classifier = new EdgeImpulseClassifier();
-                    statusEl.innerText = "준비 완료! 카메라를 켜세요.";
-                    clearInterval(check);
+                    statusEl.innerText = "준비 완료! 시작 버튼을 누르세요.";
+                    startBtn.disabled = false;
+                    clearInterval(checkEngine);
                 }
             }, 500);
         };
 
-        // 2. 카메라 시작
+        // 3. 카메라 및 분석 시작
         async function initCamera() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment', width: 96, height: 96 } 
+                    video: { facingMode: 'environment' } 
                 });
                 video.srcObject = stream;
-                document.getElementById('startBtn').style.display = 'none';
-                statusEl.innerText = "분석 중...";
+                startBtn.style.display = 'none';
+                statusEl.innerText = "실시간 분석 중...";
                 
-                // 0.5초마다 분석 실행
-                setInterval(classifyFrame, 500);
+                // 오프라인 상태에서도 0.5초마다 자체 연산 실행
+                setInterval(runInference, 500);
             } catch (err) {
-                alert("카메라 권한이 필요합니다: " + err.message);
+                alert("카메라 연결 실패: " + err.message);
             }
         }
 
-        // 3. 실시간 분석 (SDK 방식 사용)
-        async function classifyFrame() {
+        async function runInference() {
             if (!classifier) return;
 
             const canvas = document.createElement('canvas');
             canvas.width = 96; canvas.height = 96;
-            canvas.getContext('2d').drawImage(video, 0, 0, 96, 96);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, 96, 96);
             
-            // 이미지에서 특징 추출
-            const imgData = canvas.getContext('2d').getImageData(0, 0, 96, 96).data;
+            // 이미지 데이터 추출 및 특징 변환
+            const imgData = ctx.getImageData(0, 0, 96, 96).data;
             const features = [];
             for (let i = 0; i < imgData.length; i += 4) {
-                // R, G, B 값을 합쳐서 하나의 숫자로 변환 (모델 규격)
-                const r = imgData[i]; const g = imgData[i+1]; const b = imgData[i+2];
-                features.push((r << 16) | (g << 8) | b);
+                features.push((imgData[i] << 16) | (imgData[i+1] << 8) | imgData[i+2]);
             }
 
-            // 분석 실행
+            // [오프라인 핵심] 서버 통신 없이 핸드폰 내부에서만 실행
             const res = classifier.classify(features);
             
             if (res.results) {
-                const labels = res.results.map(r => `${r.label}: ${(r.value * 100).toFixed(0)}%`);
-                resultEl.innerText = labels.join(' / ');
-
-                // 컵이 70% 이상 감지되면 알림
                 const cup = res.results.find(r => r.label.toLowerCase().includes('cup'));
-                if (cup && cup.value > 0.7) {
+                const score = (cup.value * 100).toFixed(0);
+                resultEl.innerText = `컵 감지 확률: ${score}%`;
+
+                if (score > 75) {
                     statusEl.innerText = "🔔 컵 발견!";
                     statusEl.style.color = "#ff4444";
-                    if (navigator.vibrate) navigator.vibrate(200); // 진동 알림
+                    if (navigator.vibrate) navigator.vibrate(200);
                 } else {
                     statusEl.innerText = "분석 중...";
                     statusEl.style.color = "#6c63ff";
