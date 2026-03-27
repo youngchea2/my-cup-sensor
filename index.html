@@ -1,53 +1,98 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-    <meta charset="utf-8">
-    <title>Browser inference demo</title>
-
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Cup Sensor - Final</title>
     <style>
-        #features {
-            width: 50%;
-            font-size: 18px;
-        }
-
-        #results {
-            font-family: monospace;
-            white-space: pre;
-        }
+        body { text-align: center; font-family: sans-serif; background: #1a1a2e; color: white; margin: 0; padding: 20px; }
+        #video { width: 100%; max-width: 400px; border-radius: 15px; background: #000; }
+        #status { font-size: 1.5rem; margin: 20px 0; font-weight: bold; color: #6c63ff; }
+        #result { font-size: 1.2rem; color: #00ff00; background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; }
+        button { padding: 15px 30px; font-size: 18px; border-radius: 50px; border: none; background: #28a745; color: white; cursor: pointer; }
     </style>
 </head>
 <body>
-    <h1></h1>
-
-    <p>
-        <input type="text" id="features" placeholder="Paste your features here">
-    </p>
-    <p>
-        <button id="run-inference">Run inference</button>
-    </p>
-    <p id="results"></p>
+    <h2>🔍 실시간 컵 감지 시스템</h2>
+    <video id="video" autoplay playsinline muted></video>
+    <div id="status">시스템 준비 중...</div>
+    <div id="result">기다려 주세요...</div>
+    <br>
+    <button id="startBtn" onclick="initCamera()">카메라 시작</button>
 
     <script src="edge-impulse-standalone.js"></script>
     <script src="run-impulse.js"></script>
+
     <script>
-        (async () => {
-            var classifier = new EdgeImpulseClassifier();
-            await classifier.init();
+        let classifier;
+        const video = document.getElementById('video');
+        const statusEl = document.getElementById('status');
+        const resultEl = document.getElementById('result');
 
-            let project = classifier.getProjectInfo();
-            document.querySelector('h1').textContent = project.owner + ' / ' + project.name + ' (version ' + project.deploy_version + ')';
+        // 1. 모델 초기화 대기
+        window.onload = async () => {
+            const check = setInterval(() => {
+                if (typeof EdgeImpulseClassifier !== 'undefined') {
+                    classifier = new EdgeImpulseClassifier();
+                    statusEl.innerText = "준비 완료! 카메라를 켜세요.";
+                    clearInterval(check);
+                }
+            }, 500);
+        };
 
-            document.querySelector('#run-inference').onclick = () => {
-                try {
-                    let features = document.querySelector('#features').value.split(',').map(x => Number(x.trim()));
-                    let res = classifier.classify(features);
-                    document.querySelector('#results').textContent = JSON.stringify(res, null, 4);
+        // 2. 카메라 시작
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment', width: 96, height: 96 } 
+                });
+                video.srcObject = stream;
+                document.getElementById('startBtn').style.display = 'none';
+                statusEl.innerText = "분석 중...";
+                
+                // 0.5초마다 분석 실행
+                setInterval(classifyFrame, 500);
+            } catch (err) {
+                alert("카메라 권한이 필요합니다: " + err.message);
+            }
+        }
+
+        // 3. 실시간 분석 (SDK 방식 사용)
+        async function classifyFrame() {
+            if (!classifier) return;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = 96; canvas.height = 96;
+            canvas.getContext('2d').drawImage(video, 0, 0, 96, 96);
+            
+            // 이미지에서 특징 추출
+            const imgData = canvas.getContext('2d').getImageData(0, 0, 96, 96).data;
+            const features = [];
+            for (let i = 0; i < imgData.length; i += 4) {
+                // R, G, B 값을 합쳐서 하나의 숫자로 변환 (모델 규격)
+                const r = imgData[i]; const g = imgData[i+1]; const b = imgData[i+2];
+                features.push((r << 16) | (g << 8) | b);
+            }
+
+            // 분석 실행
+            const res = classifier.classify(features);
+            
+            if (res.results) {
+                const labels = res.results.map(r => `${r.label}: ${(r.value * 100).toFixed(0)}%`);
+                resultEl.innerText = labels.join(' / ');
+
+                // 컵이 70% 이상 감지되면 알림
+                const cup = res.results.find(r => r.label.toLowerCase().includes('cup'));
+                if (cup && cup.value > 0.7) {
+                    statusEl.innerText = "🔔 컵 발견!";
+                    statusEl.style.color = "#ff4444";
+                    if (navigator.vibrate) navigator.vibrate(200); // 진동 알림
+                } else {
+                    statusEl.innerText = "분석 중...";
+                    statusEl.style.color = "#6c63ff";
                 }
-                catch (ex) {
-                    alert('Failed to classify: ' + (ex.message || ex.toString()));
-                }
-            };
-        })();
+            }
+        }
     </script>
 </body>
 </html>
