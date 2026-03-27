@@ -2,63 +2,76 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Browser inference demo</title>
-
+    <title>AI 컵 감지 센서</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        #features {
-            width: 50%;
-            font-size: 18px;
-        }
-
-        #results {
-            font-family: monospace;
-            white-space: pre;
-        }
+        body { font-family: sans-serif; text-align: center; padding: 20px; }
+        #video { width: 100%; max-width: 400px; border-radius: 10px; }
+        .result-box { margin-top: 20px; font-size: 24px; font-weight: bold; }
+        #start-btn { padding: 15px 30px; font-size: 18px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
     </style>
 </head>
 <body>
-    <h1></h1>
-
-    <p>
-        <input type="text" id="features" placeholder="Paste your features here">
-    </p>
-    <p>
-        <button id="run-inference">Run inference</button>
-    </p>
-    <p id="results"></p>
+    <h1>컵 감지 센서</h1>
+    <button id="start-btn">카메라 시작 (진동 활성화)</button>
+    <br><br>
+    <video id="video" autoplay playsinline></video>
+    <div id="results" class="result-box">결과 대기 중...</div>
 
     <script src="edge-impulse-standalone.js"></script>
-    <script src="run-impulse.js"></script>
-    <script>
-        (async () => {
-            var classifier = new EdgeImpulseClassifier();
-            // 컵(CUP)의 확률이 0.8(80%)을 넘으면 진동!
-            const cupResult = results.classification.find(r => r.label === 'CUP');
 
-            if (cupResult && cupResult.value > 0.8) {
-                if (window.navigator.vibrate) {
-                    window.navigator.vibrate(500); // 0.5초 진동
-                    console.log("CUP 감지됨! 진동 발생");
-                }
-            }
+    <script>
+        const video = document.getElementById('video');
+        const resultsDiv = document.getElementById('results');
+        const startBtn = document.getElementById('start-btn');
+
+        let classifier;
+
+        // 카메라 시작 및 AI 초기화
+        startBtn.onclick = async () => {
+            startBtn.style.display = 'none';
+            
+            // 1. 모델 로드
+            classifier = new EdgeImpulseClassifier();
             await classifier.init();
 
+            // 2. 카메라 권한 요청
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            video.srcObject = stream;
 
+            // 3. 실시간 분석 시작
+            setInterval(classifyFrame, 500); // 0.5초마다 분석
+        };
 
-            let project = classifier.getProjectInfo();
-            document.querySelector('h1').textContent = project.owner + ' / ' + project.name + ' (version ' + project.deploy_version + ')';
+        async function classifyFrame() {
+            if (!classifier) return;
 
-            document.querySelector('#run-inference').onclick = () => {
-                try {
-                    let features = document.querySelector('#features').value.split(',').map(x => Number(x.trim()));
-                    let res = classifier.classify(features);
-                    document.querySelector('#results').textContent = JSON.stringify(res, null, 4);
+            // 현재 카메라 화면 분석 (실제 내부 로직은 모델 라이브러리에 따라 다를 수 있음)
+            // 예제 코드의 핵심 부분입니다.
+            const result = await classifier.classify(getFeaturesFromVideo(video));
+
+            const cup = result.classification.find(r => r.label === 'CUP');
+            const score = cup ? cup.value : 0;
+
+            resultsDiv.innerText = `CUP 확률: ${(score * 100).toFixed(1)}%`;
+
+            // 컵이 80% 이상 감지되면 진동!
+            if (score > 0.8) {
+                resultsDiv.style.color = 'red';
+                if (navigator.vibrate) {
+                    window.navigator.vibrate(500); 
                 }
-                catch (ex) {
-                    alert('Failed to classify: ' + (ex.message || ex.toString()));
-                }
-            };
-        })();
+            } else {
+                resultsDiv.style.color = 'black';
+            }
+        }
+
+        // 비디오에서 특징 추출 (Edge Impulse 라이브러리 함수 활용)
+        function getFeaturesFromVideo(videoElement) {
+            // 이 부분은 다운로드 받으신 예제 폴더 내 run-impulse.js의 로직을 따릅니다.
+            // 여기서는 개념적인 흐름만 보여드립니다.
+            return []; // 실제 라이브러리 연동 시 필요한 데이터 형식으로 변환 필요
+        }
     </script>
 </body>
 </html>
