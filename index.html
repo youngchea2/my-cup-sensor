@@ -27,11 +27,16 @@
     </div>
     <div id="offline-badge">오프라인 모드 지원됨</div>
 
+    <div id="performance-monitor" style="position: fixed; bottom: 20px; left: 20px; background: rgba(0,0,0,0.7); color: #00ff00; padding: 12px; border-radius: 10px; font-family: 'Courier New', monospace; font-size: 14px; z-index: 9999; border: 1px solid #444;">
+        <div style="margin-bottom: 5px; font-weight: bold; color: #fff;">⚡ 실시간 성능 모니터</div>
+        <div>지연 시간: <span id="latency-ms" style="color: #ffff00;">0</span> ms</div>
+        <div>프레임(FPS): <span id="fps-val" style="color: #ffff00;">0</span></div>
+    </div>
+
     <script src="edge-impulse-standalone.js"></script>
     <script src="run-impulse.js"></script>
 
     <script>
-        // 기존의 Blob 관련 복잡한 코드는 지우고 아래 3줄만 남기세요
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js');
         }
@@ -42,7 +47,9 @@
         const resultEl = document.getElementById('result');
         const startBtn = document.getElementById('startBtn');
 
-        // 2. 모델 엔진 초기화
+        // [추가] 속도 측정을 위한 전역 변수
+        let lastTimestamp = performance.now();
+
         window.onload = () => {
             const checkEngine = setInterval(() => {
                 if (typeof EdgeImpulseClassifier !== 'undefined') {
@@ -54,7 +61,6 @@
             }, 500);
         };
 
-        // 3. 카메라 및 분석 시작
         async function initCamera() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -64,8 +70,8 @@
                 startBtn.style.display = 'none';
                 statusEl.innerText = "실시간 분석 중...";
                 
-                // 오프라인 상태에서도 0.5초마다 자체 연산 실행
-                setInterval(runInference, 500);
+                // [수정] 분석 주기를 500ms -> 50ms로 단축 (컨베이어 벨트용)
+                setInterval(runInference, 50); 
             } catch (err) {
                 alert("카메라 연결 실패: " + err.message);
             }
@@ -74,43 +80,54 @@
         async function runInference() {
             if (!classifier) return;
 
+            // [추가] 1. 추론 시작 시간 측정
+            const startTime = performance.now();
+
             const canvas = document.createElement('canvas');
             canvas.width = 96; canvas.height = 96;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, 96, 96);
             
-            // 이미지 데이터 추출 및 특징 변환
             const imgData = ctx.getImageData(0, 0, 96, 96).data;
             const features = [];
             for (let i = 0; i < imgData.length; i += 4) {
                 features.push((imgData[i] << 16) | (imgData[i+1] << 8) | imgData[i+2]);
             }
 
-            // [오프라인 핵심] 서버 통신 없이 핸드폰 내부에서만 실행
             const res = classifier.classify(features);
             
+            // [추가] 2. 추론 종료 및 지연 시간(Latency) 계산
+            const endTime = performance.now();
+            const latency = (endTime - startTime).toFixed(1);
+            document.getElementById('latency-ms').innerText = latency;
+
+            // [추가] 3. FPS(초당 프레임) 계산
+            const fps = (1000 / (endTime - lastTimestamp)).toFixed(1);
+            document.getElementById('fps-val').innerText = fps;
+            lastTimestamp = endTime;
+
+            // [추가] 4. 성능 수치에 따른 색상 변경 (시각적 피드백)
+            const latencyDisplay = document.getElementById('latency-ms');
+            if (latency > 100) latencyDisplay.style.color = "#ff4d4d"; // 100ms 넘으면 빨강
+            else latencyDisplay.style.color = "#ffff00"; // 평소엔 노랑
+
             if (res.results) {
                 const cup = res.results.find(r => r.label.toLowerCase().includes('cup'));
-                const score = (cup.value * 100).toFixed(0);
-                resultEl.innerText = `컵 감지 확률: ${score}%`;
+                if (cup) {
+                    const score = (cup.value * 100).toFixed(0);
+                    resultEl.innerText = `컵 감지 확률: ${score}%`;
 
-                if (score > 75) {
-                    statusEl.innerText = "🔔 컵 발견!";
-                    statusEl.style.color = "#ff4444";
-                    if (navigator.vibrate) navigator.vibrate(200);
-                } else {
-                    statusEl.innerText = "분석 중...";
-                    statusEl.style.color = "#6c63ff";
+                    if (score > 75) {
+                        statusEl.innerText = "🔔 컵 발견!";
+                        statusEl.style.color = "#ff4444";
+                        if (navigator.vibrate) navigator.vibrate(200);
+                    } else {
+                        statusEl.innerText = "분석 중...";
+                        statusEl.style.color = "#6c63ff";
+                    }
                 }
             }
         }
     </script>
-    <div id="performance-monitor" style="position: fixed; bottom: 20px; left: 20px; background: rgba(0,0,0,0.7); color: #00ff00; padding: 12px; border-radius: 10px; font-family: 'Courier New', monospace; font-size: 14px; z-index: 9999; border: 1px solid #444;">
-    <div style="margin-bottom: 5px; font-weight: bold; color: #fff;">⚡ 실시간 성능 모니터</div>
-    <div>지연 시간: <span id="latency-ms" style="color: #ffff00;">0</span> ms</div>
-    <div>프레임(FPS): <span id="fps-val" style="color: #ffff00;">0</span></div>
-    </div>
-
-</div>
 </body>
 </html>
