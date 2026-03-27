@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>AI Cup Sensor - Debug</title>
+    <title>AI Cup Sensor - Final Debug</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { text-align: center; font-family: sans-serif; padding: 20px; background: #f4f4f4; }
@@ -15,7 +15,7 @@
 <body>
     <div id="container">
         <h1>AI 컵 센서</h1>
-        <div id="status" style="color: blue;">파일 분석 중...</div>
+        <div id="status" style="color: blue;">엔진 수색 중...</div>
         <button id="start-btn">센서 시작</button>
         <video id="video" autoplay playsinline></video>
         <div id="results" style="font-size: 24px; margin-top: 15px; font-weight: bold; color: #007bff;"></div>
@@ -28,25 +28,29 @@
         const results = document.getElementById('results');
         let classifier;
 
-        // 라이브러리 안에서 진짜 클래스 이름을 찾는 탐정 함수
-        function findClassifier() {
+        // 진짜 AI 클래스를 찾는 정밀 수색 함수
+        function _scanForEngine() {
+            // 1순위: 표준 이름 확인
+            if (window.EdgeImpulseClassifier) return 'EdgeImpulseClassifier';
+            
+            // 2순위: 수동 수색 (이름에 Classifier가 들어가고, 제가 만든 함수가 아닌 것)
             const keys = Object.keys(window);
-            // EdgeImpulse, Classifier, 혹은 프로젝트명이 포함된 객체를 찾습니다.
             return keys.find(k => 
-                (k.toLowerCase().includes('edge') || k.toLowerCase().includes('classifier')) 
-                && typeof window[k] === 'function'
+                k !== '_scanForEngine' && 
+                k.toLowerCase().includes('classifier') && 
+                typeof window[k] === 'function'
             );
         }
 
         function onLibraryLoaded() {
-            const foundName = findClassifier();
-            if (foundName) {
-                status.innerText = "찾았습니다! (" + foundName + ") 버튼을 누르세요.";
+            const engineName = _scanForEngine();
+            if (engineName) {
+                status.innerText = "엔진 확인: " + engineName + " (시작하세요)";
                 status.style.color = "green";
-                window.RealClassName = foundName; // 찾은 이름을 전역 변수에 저장
+                window.RealEngineName = engineName; 
                 startBtn.style.display = "block";
             } else {
-                status.innerText = "파일 안에서 AI 엔진을 찾지 못했습니다. (JS 파일 내용 확인 필요)";
+                status.innerText = "에러: 라이브러리는 로드됐으나 엔진 클래스가 없습니다.";
                 status.style.color = "red";
             }
         }
@@ -56,12 +60,14 @@
                 startBtn.style.display = "none";
                 status.innerText = "카메라 및 AI 엔진 구동 중...";
 
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
                 video.srcObject = stream;
                 video.style.display = "block";
 
-                // 찾은 이름으로 초기화
-                classifier = new window[window.RealClassName]();
+                // 찾은 엔진 이름으로 객체 생성
+                classifier = new window[window.RealEngineName]();
                 await classifier.init();
                 
                 status.innerText = "분석 시작! 컵을 비춰보세요.";
@@ -77,17 +83,22 @@
             try {
                 const res = await classifier.classify(); 
                 if (res.classification) {
+                    // 레이블에 'CUP'이 포함되어 있는지 확인
                     const cup = res.classification.find(i => i.label.toUpperCase().includes('CUP'));
                     const score = cup ? cup.value : 0;
                     results.innerText = "CUP 확률: " + (score * 100).toFixed(1) + "%";
 
                     if (score > 0.8) {
+                        results.style.color = "red";
                         if (navigator.vibrate) navigator.vibrate(500); 
+                    } else {
+                        results.style.color = "#007bff";
                     }
                 }
             } catch (e) { }
         }
 
+        // 라이브러리 로드
         const script = document.createElement('script');
         script.src = "edge-impulse-standalone.js?v=" + Date.now();
         script.onload = onLibraryLoaded;
