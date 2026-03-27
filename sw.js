@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cup-sensor-v4';
+const CACHE_NAME = 'cup-sensor-v5';
 // 오프라인에서 사용할 파일 목록
 const ASSETS = [
   './',
