@@ -31,18 +31,9 @@
     <script src="run-impulse.js"></script>
 
     <script>
-        // 1. 오프라인 사용을 위한 서비스 워커 등록 (인라인 방식)
+        // 기존의 Blob 관련 복잡한 코드는 지우고 아래 3줄만 남기세요
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                const swCode = `
-                    const CACHE_NAME = 'cup-v1';
-                    const ASSETS = ['./', './index.html', './edge-impulse-standalone.js', './edge-impulse-standalone.wasm', './run-impulse.js'];
-                    self.addEventListener('install', e => e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS))));
-                    self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))));
-                `;
-                const blob = new Blob([swCode], { type: 'application/javascript' });
-                navigator.serviceWorker.register(URL.createObjectURL(blob));
-            });
+            navigator.serviceWorker.register('./sw.js');
         }
 
         let classifier;
