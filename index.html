@@ -1,201 +1,53 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>컵 감지기</title>
-  <style>
-    body { font-family: sans-serif; text-align: center; background: #1a1a2e; color: white; padding: 16px; }
-    video { width: 100%; max-width: 480px; border-radius: 12px; }
-    canvas { display: none; }
-    #status { font-size: 1.8rem; margin: 16px 0; }
-    #log { font-size: 0.8rem; color: #888; text-align: left;
-           background: #111; padding: 8px; border-radius: 8px;
-           max-height: 120px; overflow-y: auto; margin-top: 12px; }
-    button { padding: 12px 28px; font-size: 1rem; border-radius: 8px;
-             background: #6c63ff; color: white; border: none; cursor: pointer; margin: 6px; }
-  </style>
-</head>
-<body>
-  <h2>🔍 컵 감지기</h2>
-  <video id="video" autoplay playsinline muted></video>
-  <canvas id="canvas"></canvas>
-  <div id="status">모델 로딩 중...</div>
-  <div id="scores"></div>
-  <br>
-  <button id="startBtn" onclick="startDetection()" disabled>감지 시작</button>
-  <button onclick="stopDetection()">중지</button>
-  <div id="log"></div>
+async function runLoop() {
+  if (!running) return;
 
-  <!-- ★ 다운받은 파일명으로 변경하세요 ★ -->
-  <script src="edge-impulse-standalone.js"></script>
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
 
-  <script>
-    let running = false;
-    let audioCtx = null;
-    let classifier = null;
+  const W = 96, H = 96;
+  canvas.width = W;
+  canvas.height = H;
+  ctx.drawImage(video, 0, 0, W, H);
+  const imageData = ctx.getImageData(0, 0, W, H);
 
-    function log(msg) {
-      const el = document.getElementById('log');
-      el.innerHTML += `<div>${new Date().toLocaleTimeString()} ${msg}</div>`;
-      el.scrollTop = el.scrollHeight;
-      console.log(msg);
+  try {
+    // RGB Float32 배열로 변환
+    const floatArr = new Float32Array(W * H * 3);
+    for (let i = 0, j = 0; i < imageData.data.length; i += 4, j += 3) {
+      floatArr[j]   = imageData.data[i]   / 255;
+      floatArr[j+1] = imageData.data[i+1] / 255;
+      floatArr[j+2] = imageData.data[i+2] / 255;
     }
 
-    // ─── 모델 초기화 (다양한 API 이름 자동 탐지) ───
-    async function initModel() {
-      log('모델 초기화 시작...');
+    // ✅ 3번째 인수(debug=false) 추가
+    const result = classifier.run_classifier(floatArr, floatArr.length, false);
 
-      // Edge Impulse WASM이 노출하는 가능한 전역 객체명들
-      const candidates = [
-        'EdgeImpulseClassifier',
-        'Module',
-        'EdgeImpulse',
-        'ei',
-      ];
+    log('추론 결과: ' + JSON.stringify(result));
 
-      for (const name of candidates) {
-        if (window[name]) {
-          log(`전역 객체 발견: ${name}`);
-          classifier = window[name];
-          break;
-        }
-      }
+    // 결과 파싱 — Module 버전은 result.result.classification 구조
+    const labels = result?.result?.classification
+                ?? result?.results
+                ?? result?.classification
+                ?? [];
 
-      if (!classifier) {
-        log('❌ 전역 객체를 못 찾음. 현재 window 키:');
-        // 알려진 EI 관련 키만 출력
-        Object.keys(window)
-          .filter(k => k.toLowerCase().includes('edge') || k.toLowerCase().includes('impulse') || k === 'Module')
-          .forEach(k => log('  → ' + k));
-        document.getElementById('status').textContent = '❌ 모델 로드 실패 — 콘솔 확인';
-        return;
-      }
+    document.getElementById('scores').textContent =
+      labels.map(r => `${r.label}: ${(r.value * 100).toFixed(1)}%`).join('  |  ');
 
-      // init() 또는 run()이 있으면 호출
-      try {
-        if (typeof classifier.init === 'function') {
-          await classifier.init();
-          log('classifier.init() 완료');
-        } else if (typeof classifier.run_classifier_init === 'function') {
-          await classifier.run_classifier_init();
-          log('run_classifier_init() 완료');
-        } else {
-          log('init 함수 없음 — 바로 사용 시도');
-        }
-      } catch(e) {
-        log('init 오류 (무시): ' + e.message);
-      }
+    const cupScore = labels.find(r => r.label === 'cup')?.value ?? 0;
 
-      log('✅ 모델 준비 완료');
-      document.getElementById('status').textContent = '준비 완료 — 감지 시작을 누르세요';
-      document.getElementById('startBtn').disabled = false;
+    if (cupScore > 0.75) {
+      document.getElementById('status').textContent = '🔔 컵 감지됨!';
+      document.getElementById('status').style.color = '#ff6b6b';
+      playAlarm();
+    } else {
+      document.getElementById('status').textContent = '🔍 스캔 중...';
+      document.getElementById('status').style.color = 'white';
     }
 
-    // ─── 카메라 시작 ───
-    async function startDetection() {
-      const video = document.getElementById('video');
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: 640, height: 480 }
-        });
-        video.srcObject = stream;
-        await video.play();
-        log('카메라 시작');
-        running = true;
-        runLoop();
-      } catch(e) {
-        log('카메라 오류: ' + e.message);
-      }
-    }
+  } catch(e) {
+    log('추론 오류: ' + e.message);
+  }
 
-    function stopDetection() {
-      running = false;
-      document.getElementById('status').textContent = '중지됨';
-    }
-
-    // ─── 추론 루프 ───
-    async function runLoop() {
-      if (!running) return;
-
-      const video = document.getElementById('video');
-      const canvas = document.getElementById('canvas');
-      const ctx = canvas.getContext('2d');
-
-      // Edge Impulse 모델 입력 크기 (학습 시 설정한 값으로 변경)
-      const W = 96, H = 96;
-      canvas.width = W;
-      canvas.height = H;
-      ctx.drawImage(video, 0, 0, W, H);
-      const imageData = ctx.getImageData(0, 0, W, H);
-
-      try {
-        let result;
-
-        // classify() 또는 run_classifier() 자동 선택
-        if (typeof classifier.classify === 'function') {
-          result = await classifier.classify(Array.from(imageData.data));
-
-        } else if (typeof classifier.run_classifier === 'function') {
-          // run_classifier는 Float32Array를 받는 경우가 많음
-          const floatArr = new Float32Array(W * H * 3);
-          for (let i = 0, j = 0; i < imageData.data.length; i += 4, j += 3) {
-            floatArr[j]   = imageData.data[i]   / 255;
-            floatArr[j+1] = imageData.data[i+1] / 255;
-            floatArr[j+2] = imageData.data[i+2] / 255;
-          }
-          result = await classifier.run_classifier(floatArr, false);
-
-        } else {
-          log('❌ classify / run_classifier 함수 없음');
-          log('사용 가능한 메서드: ' + Object.keys(classifier).filter(k => typeof classifier[k] === 'function').join(', '));
-          stopDetection();
-          return;
-        }
-
-        // 결과 파싱 (두 가지 포맷 대응)
-        const labels = result.results ?? result.classification ?? [];
-        document.getElementById('scores').textContent =
-          labels.map(r => `${r.label}: ${(r.value * 100).toFixed(1)}%`).join('  |  ');
-
-        const cupScore = labels.find(r => r.label === 'cup')?.value ?? 0;
-
-        if (cupScore > 0.75) {
-          document.getElementById('status').textContent = '🔔 컵 감지됨!';
-          document.getElementById('status').style.color = '#ff6b6b';
-          playAlarm();
-        } else {
-          document.getElementById('status').textContent = '🔍 스캔 중...';
-          document.getElementById('status').style.color = 'white';
-        }
-
-      } catch(e) {
-        log('추론 오류: ' + e.message);
-        console.error(e);
-      }
-
-      setTimeout(runLoop, 600);
-    }
-
-    // ─── 알람 ───
-    function playAlarm() {
-      audioCtx = audioCtx || new AudioContext();
-      [880, 660, 880].forEach((freq, i) => {
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        const t = audioCtx.currentTime + i * 0.2;
-        osc.frequency.setValueAtTime(freq, t);
-        gain.gain.setValueAtTime(0.3, t);
-        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.18);
-        osc.start(t);
-        osc.stop(t + 0.18);
-      });
-    }
-
-    // 페이지 로드 시 바로 모델 초기화
-    window.addEventListener('load', initModel);
-  </script>
-</body>
-</html>
+  setTimeout(runLoop, 600);
+}
