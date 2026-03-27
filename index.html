@@ -5,84 +5,91 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
-    <title>AI Cup Sensor (Offline)</title>
+    <title>AI Multi-Object Sensor</title>
     <style>
-        body { text-align: center; font-family: sans-serif; background: #1a1a2e; color: white; margin: 0; padding: 20px; }
-        #video { width: 100%; max-width: 400px; border-radius: 15px; background: #000; border: 2px solid #333; }
-        #status { font-size: 1.4rem; margin: 20px 0; font-weight: bold; color: #6c63ff; }
-        #result { font-size: 1.1rem; color: #00ff00; background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; min-height: 1.2em; }
-        .btn-group { margin-top: 20px; }
-        button { padding: 15px 30px; font-size: 18px; border-radius: 50px; border: none; background: #28a745; color: white; cursor: pointer; font-weight: bold; }
-        #offline-badge { font-size: 0.8rem; color: #888; margin-top: 10px; }
+        body { text-align: center; font-family: 'Malgun Gothic', sans-serif; background: #12122b; color: white; margin: 0; padding: 20px; }
+        #video { width: 100%; max-width: 400px; border-radius: 15px; background: #000; border: 2px solid #444; }
+        #status { font-size: 1.5rem; margin: 15px 0; font-weight: bold; color: #00d4ff; min-height: 1.6em; }
+        #result-container { background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 12px; max-width: 400px; margin: 0 auto; }
+        .label-score { font-size: 1.2rem; color: #00ff00; margin: 5px 0; }
+        button { padding: 15px 40px; font-size: 18px; border-radius: 50px; border: none; background: #28a745; color: white; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        button:disabled { background: #555; }
+        #performance-monitor { position: fixed; bottom: 20px; right: 20px; background: rgba(0,0,0,0.8); color: #00ff00; padding: 12px; border-radius: 10px; font-family: monospace; font-size: 12px; text-align: left; border: 1px solid #333; }
     </style>
 </head>
 <body>
-    <h2>🔍 무선 컵 감지 시스템 v4</h2>
+    <h2>🚀 초고속 다중 물체 감지 v3</h2>
     <video id="video" autoplay playsinline muted></video>
-    <div id="status">엔진 로딩 중...</div>
-    <div id="result">-- %</div>
     
-    <div class="btn-group">
-        <button id="startBtn" onclick="initCamera()" disabled>센서 시작</button>
+    <div id="status">엔진 준비 중...</div>
+    
+    <div id="result-container">
+        <div id="top-result" class="label-score">준비 완료</div>
+        <div id="inference-details" style="font-size: 0.9rem; color: #aaa;">버튼을 눌러 시작하세요</div>
     </div>
-    <div id="offline-badge">오프라인 모드 지원됨</div>
 
-    <div id="performance-monitor" style="position: fixed; bottom: 20px; left: 20px; background: rgba(0,0,0,0.7); color: #00ff00; padding: 12px; border-radius: 10px; font-family: 'Courier New', monospace; font-size: 14px; z-index: 9999; border: 1px solid #444;">
-        <div style="margin-bottom: 5px; font-weight: bold; color: #fff;">⚡ 실시간 성능 모니터</div>
-        <div>지연 시간: <span id="latency-ms" style="color: #ffff00;">0</span> ms</div>
-        <div>프레임(FPS): <span id="fps-val" style="color: #ffff00;">0</span></div>
+    <div style="margin-top: 20px;">
+        <button id="startBtn" onclick="initCamera()" disabled>시스템 가동</button>
+    </div>
+
+    <div id="performance-monitor">
+        <div style="color: #fff; border-bottom: 1px solid #444; margin-bottom: 5px; padding-bottom: 3px;">⚙️ 성능 데이터</div>
+        <div>지연시간: <span id="latency-ms">0</span> ms</div>
+        <div>프레임: <span id="fps-val">0</span> FPS</div>
     </div>
 
     <script src="edge-impulse-standalone.js"></script>
     <script src="run-impulse.js"></script>
 
     <script>
+        // 서비스 워커 등록 (오프라인 지원)
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js');
         }
 
         let classifier;
+        let lastTimestamp = performance.now();
         const video = document.getElementById('video');
         const statusEl = document.getElementById('status');
-        const resultEl = document.getElementById('result');
+        const topResultEl = document.getElementById('top-result');
         const startBtn = document.getElementById('startBtn');
 
-        // [추가] 속도 측정을 위한 전역 변수
-        let lastTimestamp = performance.now();
-
+        // 1. 모델 엔진 초기화 확인
         window.onload = () => {
             const checkEngine = setInterval(() => {
                 if (typeof EdgeImpulseClassifier !== 'undefined') {
                     classifier = new EdgeImpulseClassifier();
-                    statusEl.innerText = "준비 완료! 시작 버튼을 누르세요.";
+                    statusEl.innerText = "시스템 준비 완료";
                     startBtn.disabled = false;
                     clearInterval(checkEngine);
                 }
             }, 500);
         };
 
+        // 2. 카메라 가동 및 분석 루프 시작
         async function initCamera() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment' } 
+                    video: { facingMode: 'environment', width: 640, height: 480 } 
                 });
                 video.srcObject = stream;
                 startBtn.style.display = 'none';
                 statusEl.innerText = "실시간 분석 중...";
                 
-                // [수정] 분석 주기를 500ms -> 50ms로 단축 (컨베이어 벨트용)
+                // 50ms 간격으로 추론 실행 (초당 약 20회)
                 setInterval(runInference, 50); 
             } catch (err) {
-                alert("카메라 연결 실패: " + err.message);
+                alert("카메라 오류: " + err.message);
             }
         }
 
+        // 3. 실시간 다중 물체 추론 로직
         async function runInference() {
             if (!classifier) return;
 
-            // [추가] 1. 추론 시작 시간 측정
             const startTime = performance.now();
 
+            // 96x96 이미지 전처리
             const canvas = document.createElement('canvas');
             canvas.width = 96; canvas.height = 96;
             const ctx = canvas.getContext('2d');
@@ -94,37 +101,39 @@
                 features.push((imgData[i] << 16) | (imgData[i+1] << 8) | imgData[i+2]);
             }
 
+            // AI 추론 실행
             const res = classifier.classify(features);
             
-            // [추가] 2. 추론 종료 및 지연 시간(Latency) 계산
             const endTime = performance.now();
-            const latency = (endTime - startTime).toFixed(1);
-            document.getElementById('latency-ms').innerText = latency;
 
-            // [추가] 3. FPS(초당 프레임) 계산
+            // 성능 데이터 업데이트
+            const latency = (endTime - startTime).toFixed(1);
             const fps = (1000 / (endTime - lastTimestamp)).toFixed(1);
+            document.getElementById('latency-ms').innerText = latency;
             document.getElementById('fps-val').innerText = fps;
             lastTimestamp = endTime;
 
-            // [추가] 4. 성능 수치에 따른 색상 변경 (시각적 피드백)
-            const latencyDisplay = document.getElementById('latency-ms');
-            if (latency > 100) latencyDisplay.style.color = "#ff4d4d"; // 100ms 넘으면 빨강
-            else latencyDisplay.style.color = "#ffff00"; // 평소엔 노랑
-
             if (res.results) {
-                const cup = res.results.find(r => r.label.toLowerCase().includes('cup'));
-                if (cup) {
-                    const score = (cup.value * 100).toFixed(0);
-                    resultEl.innerText = `컵 감지 확률: ${score}%`;
+                // 1. 확률이 가장 높은 물체 찾기
+                const top = res.results.reduce((prev, curr) => (prev.value > curr.value) ? prev : curr);
+                const score = (top.value * 100).toFixed(0);
 
-                    if (score > 75) {
-                        statusEl.innerText = "🔔 컵 발견!";
-                        statusEl.style.color = "#ff4444";
-                        if (navigator.vibrate) navigator.vibrate(200);
-                    } else {
-                        statusEl.innerText = "분석 중...";
-                        statusEl.style.color = "#6c63ff";
-                    }
+                // 2. 결과에 따른 화면 표시 로직
+                if (top.label.toUpperCase() === 'BG' || score < 70) {
+                    // 배경이거나 확신이 낮을 때
+                    statusEl.innerText = "분석 중...";
+                    statusEl.style.color = "#6c63ff";
+                    topResultEl.innerText = "대기 중";
+                    topResultEl.style.color = "#aaa";
+                } else {
+                    // 물체 감지 시 (CUP, PEN, CAR)
+                    statusEl.innerText = `🔔 ${top.label.toUpperCase()} 감지!`;
+                    statusEl.style.color = "#ff4444";
+                    topResultEl.innerText = `${top.label.toUpperCase()} (${score}%)`;
+                    topResultEl.style.color = "#00ff00";
+
+                    // 햅틱 피드백 (폰 진동)
+                    if (navigator.vibrate) navigator.vibrate(50);
                 }
             }
         }
