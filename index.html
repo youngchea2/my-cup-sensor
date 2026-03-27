@@ -1,103 +1,103 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-    <meta charset="utf-8">
-    <title>Cup Sensor - Deep Connect</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body { text-align: center; font-family: sans-serif; margin: 0; background: #1a1a1a; color: white; }
-        #container { padding: 20px; }
-        video { width: 100%; max-width: 400px; border-radius: 10px; background: #000; margin-bottom: 15px; }
-        #result { font-size: 36px; font-weight: bold; color: #ffcc00; margin: 20px 0; }
-        .status { font-size: 14px; color: #aaa; margin-bottom: 10px; }
-        button { padding: 20px; width: 80%; font-size: 18px; background: #28a745; color: white; border: none; border-radius: 50px; cursor: pointer; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>컵 감지기</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; background: #1a1a2e; color: white; }
+    video { width: 100%; max-width: 480px; border-radius: 12px; }
+    canvas { display: none; }
+    #status { font-size: 2rem; margin: 16px; }
+    #result { font-size: 1.2rem; color: #aaa; }
+    button { padding: 12px 32px; font-size: 1rem; border-radius: 8px;
+             background: #6c63ff; color: white; border: none; cursor: pointer; margin: 8px; }
+  </style>
 </head>
 <body>
-    <div id="container">
-        <h2>AI 컵 감지기</h2>
-        <div id="status" class="status">라이브러리 로드 중...</div>
-        <div id="result">연결 대기 중</div>
-        <video id="video" autoplay playsinline muted></video><br>
-        <button id="start-btn" style="display:none;">카메라 시작</button>
-    </div>
+  <h2>🔍 컵 감지기</h2>
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+  <div id="status">대기 중...</div>
+  <div id="result"></div>
+  <button onclick="startDetection()">감지 시작</button>
+  <button onclick="stopDetection()">중지</button>
 
-    <script src="edge-impulse-standalone.js"></script>
+  <!-- Edge Impulse WASM 모델 (다운받은 파일 경로로 변경) -->
+  <script src="edge-impulse-standalone.js"></script>
+  <script>
+    let running = false;
+    let audioCtx = null;
 
-    <script>
-        const video = document.getElementById('video');
-        const resultDiv = document.getElementById('result');
-        const statusDiv = document.getElementById('status');
-        const startBtn = document.getElementById('start-btn');
-        let classifier;
+    // 알람 소리 생성 (Web Audio API)
+    function playAlarm() {
+      audioCtx = audioCtx || new AudioContext();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+      osc.frequency.setValueAtTime(660, audioCtx.currentTime + 0.2);
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.4);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.6);
+    }
 
-        // 라이브러리 초기화 감지
-        window.onload = () => {
-            const checkLibrary = setInterval(() => {
-                // Module 혹은 EdgeImpulseClassifier가 로드되었는지 확인
-                if (typeof Module !== 'undefined' || typeof EdgeImpulseClassifier !== 'undefined') {
-                    clearInterval(checkLibrary);
-                    statusDiv.innerText = "엔진 로드 완료!";
-                    startBtn.style.display = "inline-block";
-                }
-            }, 500);
-        };
+    async function startDetection() {
+      const video = document.getElementById('video');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' } // 후면 카메라
+      });
+      video.srcObject = stream;
+      running = true;
+      runLoop();
+    }
 
-        startBtn.onclick = async () => {
-            startBtn.style.display = "none";
-            statusDiv.innerText = "분석 엔진 가동 중...";
+    function stopDetection() {
+      running = false;
+      document.getElementById('status').textContent = '중지됨';
+    }
 
-            try {
-                // 카메라 권한 요청
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment' } 
-                });
-                video.srcObject = stream;
+    async function runLoop() {
+      if (!running) return;
 
-                // 모델 초기화
-                const ClassifierClass = window.EdgeImpulseClassifier || (typeof Module !== 'undefined' ? Module.Classifier : null);
-                if (ClassifierClass) {
-                    classifier = new ClassifierClass();
-                    await classifier.init();
-                    statusDiv.innerText = "실시간 감시 중...";
-                    // 0.5초마다 분석 실행
-                    setInterval(doInference, 500);
-                } else {
-                    statusDiv.innerText = "엔진을 찾을 수 없습니다.";
-                }
-            } catch (err) {
-                statusDiv.innerText = "에러: " + err.message;
-            }
-        };
+      const video = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
 
-        async function doInference() {
-            if (!classifier) return;
+      // 모델 입력 크기에 맞게 (학습시 설정한 크기)
+      canvas.width = 96;
+      canvas.height = 96;
+      ctx.drawImage(video, 0, 0, 96, 96);
 
-            try {
-                // 비디오 화면 캡처 및 분석
-                const result = await classifier.classify(video);
-                
-                if (result.classification) {
-                    // 가장 확률이 높은 항목 찾기
-                    const topResult = result.classification.reduce((prev, current) => 
-                        (prev.value > current.value) ? prev : current
-                    );
+      const imageData = ctx.getImageData(0, 0, 96, 96);
 
-                    const score = (topResult.value * 100).toFixed(1);
-                    resultDiv.innerText = `${topResult.label}: ${score}%`;
+      // Edge Impulse 추론 실행
+      const result = await EdgeImpulseClassifier.classify(
+        Array.from(imageData.data)
+      );
 
-                    // 컵(CUP) 감지 시 강조 및 진동
-                    if (topResult.label.toUpperCase().includes('CUP') && topResult.value > 0.7) {
-                        resultDiv.style.color = "#ff4444"; // 빨간색
-                        if (navigator.vibrate) navigator.vibrate(300);
-                    } else {
-                        resultDiv.style.color = "#ffcc00"; // 기본 노란색
-                    }
-                }
-            } catch (e) {
-                console.error(e);
-            }
-        }
-    </script>
+      const cupScore = result.results.find(r => r.label === 'cup')?.value || 0;
+      const statusEl = document.getElementById('status');
+      const resultEl = document.getElementById('result');
+
+      resultEl.textContent = result.results
+        .map(r => `${r.label}: ${(r.value * 100).toFixed(1)}%`)
+        .join('  |  ');
+
+      if (cupScore > 0.8) { // 80% 이상 확신할 때 알람
+        statusEl.textContent = '🔔 컵 감지됨!';
+        statusEl.style.color = '#ff6b6b';
+        playAlarm();
+      } else {
+        statusEl.textContent = '🔍 스캔 중...';
+        statusEl.style.color = 'white';
+      }
+
+      setTimeout(runLoop, 500); // 0.5초마다 추론
+    }
+  </script>
 </body>
 </html>
