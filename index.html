@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
-    <title>AI Multi-Object Sensor</title>
+    <title>AI Multi-Object Sensor v10</title>
     <style>
         body { text-align: center; font-family: 'Malgun Gothic', sans-serif; background: #12122b; color: white; margin: 0; padding: 20px; }
         #video { width: 100%; max-width: 400px; border-radius: 15px; background: #000; border: 2px solid #444; }
@@ -18,14 +18,14 @@
     </style>
 </head>
 <body>
-    <h2>🚀 초고속 다중 물체 감지 v9</h2>
+    <h2>🚀 초고속 다중 물체 감지 v10</h2>
     <video id="video" autoplay playsinline muted></video>
     
     <div id="status">엔진 준비 중...</div>
     
     <div id="result-container">
         <div id="top-result" class="label-score">준비 완료</div>
-        <div id="inference-details" style="font-size: 0.9rem; color: #aaa;">버튼을 눌러 시작하세요</div>
+        <div id="inference-details" style="font-size: 0.9rem; color: #aaa;">시스템 가동을 눌러주세요</div>
     </div>
 
     <div style="margin-top: 20px;">
@@ -42,7 +42,6 @@
     <script src="run-impulse.js"></script>
 
     <script>
-        // 서비스 워커 등록 (오프라인 지원)
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('./sw.js');
         }
@@ -54,7 +53,12 @@
         const topResultEl = document.getElementById('top-result');
         const startBtn = document.getElementById('startBtn');
 
-        // 1. 모델 엔진 초기화 확인
+        // --- 연속 판정용 변수 추가 ---
+        let lastLabel = "";
+        let consecutiveCount = 0;
+        const CONFIRM_THRESHOLD = 3; // 3번 연속 일치 시 확정
+        const SCORE_THRESHOLD = 90;  // 90% 이상 확신할 때만 카운트 시작
+
         window.onload = () => {
             const checkEngine = setInterval(() => {
                 if (typeof EdgeImpulseClassifier !== 'undefined') {
@@ -66,7 +70,6 @@
             }, 500);
         };
 
-        // 2. 카메라 가동 및 분석 루프 시작
         async function initCamera() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -75,21 +78,17 @@
                 video.srcObject = stream;
                 startBtn.style.display = 'none';
                 statusEl.innerText = "실시간 분석 중...";
-                
-                // 50ms 간격으로 추론 실행 (초당 약 20회)
                 setInterval(runInference, 50); 
             } catch (err) {
                 alert("카메라 오류: " + err.message);
             }
         }
 
-        // 3. 실시간 다중 물체 추론 로직
         async function runInference() {
             if (!classifier) return;
 
             const startTime = performance.now();
 
-            // 96x96 이미지 전처리
             const canvas = document.createElement('canvas');
             canvas.width = 96; canvas.height = 96;
             const ctx = canvas.getContext('2d');
@@ -101,12 +100,10 @@
                 features.push((imgData[i] << 16) | (imgData[i+1] << 8) | imgData[i+2]);
             }
 
-            // AI 추론 실행
             const res = classifier.classify(features);
-            
             const endTime = performance.now();
 
-            // 성능 데이터 업데이트
+            // 성능 업데이트
             const latency = (endTime - startTime).toFixed(1);
             const fps = (1000 / (endTime - lastTimestamp)).toFixed(1);
             document.getElementById('latency-ms').innerText = latency;
@@ -114,27 +111,42 @@
             lastTimestamp = endTime;
 
             if (res.results) {
-                // 1. 확률이 가장 높은 물체 찾기
                 const top = res.results.reduce((prev, curr) => (prev.value > curr.value) ? prev : curr);
                 const score = (top.value * 100).toFixed(0);
+                const currentLabel = top.label.toUpperCase();
 
-                // 2. 결과에 따른 화면 표시 로직
-                if (top.label.toUpperCase() === 'BG' || score < 70) {
-                    // 배경이거나 확신이 낮을 때
+                // --- 연속 판정 로직 시작 ---
+                if (currentLabel !== 'BG' && score >= SCORE_THRESHOLD) {
+                    if (currentLabel === lastLabel) {
+                        consecutiveCount++;
+                    } else {
+                        consecutiveCount = 1;
+                        lastLabel = currentLabel;
+                    }
+
+                    // 지정된 횟수만큼 연속 감지되었을 때만 화면 업데이트
+                    if (consecutiveCount >= CONFIRM_THRESHOLD) {
+                        statusEl.innerText = `✅ ${currentLabel} 확정!`;
+                        statusEl.style.color = "#00ff00";
+                        topResultEl.innerText = `${currentLabel} (${score}%)`;
+                        topResultEl.style.color = "#00ff00";
+
+                        // 확정 시에만 진동 발생
+                        if (navigator.vibrate) navigator.vibrate(50);
+                    } else {
+                        // 카운트 중일 때는 대기 상태 유지 (화면 떨림 방지)
+                        statusEl.innerText = "인식 확인 중...";
+                    }
+                } else {
+                    // 배경이거나 신뢰도가 낮으면 카운트 초기화
+                    consecutiveCount = 0;
+                    lastLabel = "";
                     statusEl.innerText = "분석 중...";
                     statusEl.style.color = "#6c63ff";
                     topResultEl.innerText = "대기 중";
                     topResultEl.style.color = "#aaa";
-                } else {
-                    // 물체 감지 시 (CUP, PEN, CAR)
-                    statusEl.innerText = `🔔 ${top.label.toUpperCase()} 감지!`;
-                    statusEl.style.color = "#ff4444";
-                    topResultEl.innerText = `${top.label.toUpperCase()} (${score}%)`;
-                    topResultEl.style.color = "#00ff00";
-
-                    // 햅틱 피드백 (폰 진동)
-                    if (navigator.vibrate) navigator.vibrate(50);
                 }
+                // --- 연속 판정 로직 끝 ---
             }
         }
     </script>
